@@ -75,7 +75,7 @@ app.get('/health', (c) => {
  * POST /api/projects/init
  */
 app.post('/api/projects/init', async (c) => {
-  const db = drizzle(c.env.DB);
+  const db = c.get('db');
   const body = await c.req.json<{ name: string; userId?: string }>();
 
   const projectId = crypto.randomUUID();
