@@ -6,6 +6,7 @@
  */
 
 import { drizzle } from 'drizzle-orm/d1';
+import { and, eq } from 'drizzle-orm';
 import { images, type NewImage } from '../db/schema';
 
 /**
@@ -208,11 +209,9 @@ export async function deleteImage(
 
   if (!deleteResponse.ok) {
     const errorText = await deleteResponse.text();
-    console.error(`Failed to delete from Cloudflare Images: ${deleteResponse.status} - ${errorText}`);
-    throw new Error('Failed to delete image from Cloudflare Images.');
+    console.error(`Failed to delete from Cloudflare Images: ${deleteResponse.status} - ${errorText}. Proceeding with DB deletion.`);
   }
 
-  // Always delete from database to prevent orphaned records
   await db.delete(images).where(images.id.eq(imageId));
 }
 

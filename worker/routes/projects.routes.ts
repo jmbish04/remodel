@@ -4,7 +4,7 @@
 
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { projects, floors, rooms, type NewProject } from '../db/schema';
 import type { Env } from '../types';
 
@@ -41,15 +41,20 @@ projectsRouter.get('/:id', async (c) => {
 
   const projectFloors = await db.select().from(floors).where(eq(floors.projectId, projectId)).all();
 
-  const floorsWithRooms = await Promise.all(
-    projectFloors.map(async (floor) => {
-      const floorRooms = await db.select().from(rooms).where(eq(rooms.floorId, floor.id)).all();
-      return {
-        ...floor,
-        rooms: floorRooms,
-      };
-    })
-  );
+  const floorIds = projectFloors.map((f) => f.id);
+  const allRooms = floorIds.length > 0
+    ? await db.select().from(rooms).where(inArray(rooms.floorId, floorIds)).all()
+    : [];
+
+  const roomsByFloor = allRooms.reduce<Record<string, (typeof rooms.$inferSelect)[]>>((acc, room) => {
+    (acc[room.floorId] = acc[room.floorId] || []).push(room);
+    return acc;
+  }, {});
+
+  const floorsWithRooms = projectFloors.map((floor) => ({
+    ...floor,
+    rooms: roomsByFloor[floor.id] || [],
+  }));
 
   return c.json({
     success: true,
