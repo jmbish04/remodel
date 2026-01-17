@@ -21,11 +21,13 @@ import {
   X,
 } from 'lucide-react';
 import ArchitectCanvas from '@/components/ArchitectCanvas';
+import PlannerWrapper from '@/components/PlannerWrapper';
 import PreviewImage from '@/components/PreviewImage';
 import Header from '@/components/Header';
 import FloorNameModal from '@/components/FloorNameModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import WizardSidebar from '@/components/WizardSidebar';
+import { adaptGeminiToPlanner, adaptPlannerToGemini } from '@/lib/planner-adapter';
 import {
   digitizePlan,
   generate3D,
@@ -98,6 +100,9 @@ export default function Home() {
     instruction: 'Add a modern red leather sofa to the center',
   });
 
+  // Planner State
+  const [plannerState, setPlannerState] = useState<any>(null);
+
   // Visual Results
   const [render3D, setRender3D] = useState<string | null>(null);
   const [interiorView, setInteriorView] = useState<string | null>(null);
@@ -141,6 +146,14 @@ export default function Home() {
     setWizardHistory([]);
     setIsAddingRoom(false);
   }, [activeFloorId, step]);
+
+  // Initialize planner state when entering REMODEL step
+  useEffect(() => {
+    if (step === AppStep.REMODEL && activeFloor?.data && !plannerState) {
+      const initialPlannerState = adaptGeminiToPlanner(activeFloor.data);
+      setPlannerState(initialPlannerState);
+    }
+  }, [step, activeFloor?.data, plannerState]);
 
   // --- Wizard Undo ---
   const saveToHistory = () => {
@@ -534,6 +547,12 @@ export default function Home() {
         history: updatedHistory,
         currentVersionId: newVersionId,
       });
+
+      // Update planner state with new floor plan
+      if (step === AppStep.REMODEL) {
+        const newPlannerState = adaptGeminiToPlanner(newPlan);
+        setPlannerState(newPlannerState);
+      }
 
       setLoadingMessage('Saving new layout...');
       await snapshotsApi.create({
@@ -1066,28 +1085,41 @@ export default function Home() {
 
               {/* Canvas Container */}
               <div className="flex-1 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden relative">
-                <ArchitectCanvas
-                  imageSrc={activeFloor.imageSrc}
-                  imageDims={activeFloor.imageDims}
-                  data={activeFloor.data}
-                  mode={getCanvasMode()}
-                  scaleData={activeFloor.scaleData}
-                  onDataUpdate={(data) => handleUpdateActiveFloor({ data })}
-                  onZoneUpdate={(zone) => handleUpdateActiveFloor({ remodelZone: zone })}
-                  onRulerUpdate={handleRulerUpdate}
-                  onStairUpdate={(rect) => handleUpdateActiveFloor({ stairLocation: rect })}
-                  onOrientationUpdate={(o) => handleUpdateActiveFloor({ orientation: o })}
-                  onSelect={(type, id) => setSelectedElement({ type: type as 'wall' | 'door' | null, id })}
-                  onWallClick={handleWallClick}
-                  onCanvasClick={handleCanvasClick}
-                  onWallDraw={handleWallDraw}
-                  remodelZone={activeFloor.remodelZone}
-                  calibrationRuler={activeFloor.calibrationRuler}
-                  garageRuler={activeFloor.garageRuler}
-                  stairRect={activeFloor.stairLocation}
-                  orientation={activeFloor.orientation}
-                  selectedId={selectedElement.id}
-                />
+                {step === AppStep.REMODEL ? (
+                  <PlannerWrapper
+                    width={typeof window !== 'undefined' ? window.innerWidth - 400 : 800}
+                    height={typeof window !== 'undefined' ? window.innerHeight - 200 : 600}
+                    initialState={plannerState || (activeFloor.data ? adaptGeminiToPlanner(activeFloor.data) : null)}
+                    onStateChange={(newState) => {
+                      // Convert planner state back to FloorPlanData when user makes changes
+                      const newFloorData = adaptPlannerToGemini(newState);
+                      handleUpdateActiveFloor({ data: newFloorData });
+                    }}
+                  />
+                ) : (
+                  <ArchitectCanvas
+                    imageSrc={activeFloor.imageSrc}
+                    imageDims={activeFloor.imageDims}
+                    data={activeFloor.data}
+                    mode={getCanvasMode()}
+                    scaleData={activeFloor.scaleData}
+                    onDataUpdate={(data) => handleUpdateActiveFloor({ data })}
+                    onZoneUpdate={(zone) => handleUpdateActiveFloor({ remodelZone: zone })}
+                    onRulerUpdate={handleRulerUpdate}
+                    onStairUpdate={(rect) => handleUpdateActiveFloor({ stairLocation: rect })}
+                    onOrientationUpdate={(o) => handleUpdateActiveFloor({ orientation: o })}
+                    onSelect={(type, id) => setSelectedElement({ type: type as 'wall' | 'door' | null, id })}
+                    onWallClick={handleWallClick}
+                    onCanvasClick={handleCanvasClick}
+                    onWallDraw={handleWallDraw}
+                    remodelZone={activeFloor.remodelZone}
+                    calibrationRuler={activeFloor.calibrationRuler}
+                    garageRuler={activeFloor.garageRuler}
+                    stairRect={activeFloor.stairLocation}
+                    orientation={activeFloor.orientation}
+                    selectedId={selectedElement.id}
+                  />
+                )}
               </div>
             </>
           )}
