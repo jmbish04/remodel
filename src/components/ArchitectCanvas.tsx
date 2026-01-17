@@ -9,7 +9,6 @@ interface ArchitectCanvasProps {
   data: FloorPlanData | null;
   mode: CanvasMode;
   scaleData: ScaleData;
-  onDataUpdate: (newData: FloorPlanData) => void;
   onZoneUpdate: (zone: RemodelZone | null) => void;
   onRulerUpdate: (ruler: RulerData) => void;
   remodelZone: RemodelZone | null;
@@ -29,7 +28,6 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragStart, setDragStart] = useState<Point | null>(null);
-  const [activeHandle, setActiveHandle] = useState<'start' | 'end' | null>(null);
   const [activeHandle, setActiveHandle] = useState<'start' | 'end' | null>(null);
 
   // Calculate dynamic styling based on plan size
@@ -88,7 +86,6 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
 
   const handlePointerMove = (e: React.PointerEvent) => {
     const pos = getMousePos(e);
-    setHoverPos(pos);
     e.preventDefault();
 
     if (mode === 'CALIBRATE' && activeHandle) {
@@ -138,7 +135,6 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerLeave={() => setHoverPos(null)}
         preserveAspectRatio="xMidYMid meet"
         style={{ pointerEvents: 'all' }}
       >

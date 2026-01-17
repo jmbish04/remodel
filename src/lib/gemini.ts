@@ -129,12 +129,14 @@ Output the COMPLETE updated floor plan JSON.
 `;
 
 /**
- * Get the Gemini API key from environment
+ * Get the Gemini API key from environment variables
+ * In Cloudflare deployment, the worker injects GEMINI_API_KEY as an env var at runtime
  */
-function getApiKey(): string {
+async function getApiKey(): Promise<string> {
+  // Environment variables - works in both client and server contexts
   const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY environment variable is not set');
+    throw new Error('GEMINI_API_KEY is not set. Please configure the environment variable.');
   }
   return apiKey;
 }
@@ -156,6 +158,54 @@ export async function fileToBase64(file: File): Promise<string> {
 }
 
 /**
+ * Helper function for image generation API calls
+ * Reduces code duplication across generate3D, visualizeInterior, editDesign, and generateVideoFrame
+ */
+async function generateImageFromPrompt(
+  imageBase64: string,
+  prompt: string
+): Promise<string> {
+  const apiKey = await getApiKey();
+  
+  // Clean base64 string
+  const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IMAGE_GEN}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType: 'image/png', data: cleanBase64 } },
+            ],
+          },
+        ],
+        generationConfig: { responseModalities: ['IMAGE'] },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`API Error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const candidates = data.candidates;
+  if (candidates && candidates.length > 0) {
+    const parts = candidates[0].content.parts;
+    const imagePart = parts.find((p: Record<string, unknown>) => p.inlineData);
+    if (imagePart) {
+      return `data:image/png;base64,${imagePart.inlineData.data}`;
+    }
+  }
+  throw new Error('No image generated');
+}
+
+/**
  * Digitize a floor plan image into vector JSON (Source B functionality)
  * @param imageBase64 - Base64 encoded image
  * @param width - Image width in pixels
@@ -167,7 +217,8 @@ export async function digitizePlan(
   width: number,
   height: number
 ): Promise<FloorPlanData> {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const apiKey = await getApiKey();
+  const ai = new GoogleGenAI({ apiKey });
 
   const response = await ai.models.generateContent({
     model: MODEL_VISION,
@@ -234,45 +285,8 @@ export async function generate3D(
   perspective: string = 'isometric',
   style: string = 'photorealistic modern'
 ): Promise<string> {
-  const apiKey = getApiKey();
   const prompt = PROMPTS.generate3D.template.replace('{perspective}', perspective).replace('{style}', style);
-
-  // Clean base64 string
-  const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IMAGE_GEN}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: 'image/png', data: cleanBase64 } },
-            ],
-          },
-        ],
-        generationConfig: { responseModalities: ['IMAGE'] },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`API Error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const candidates = data.candidates;
-  if (candidates && candidates.length > 0) {
-    const parts = candidates[0].content.parts;
-    const imagePart = parts.find((p: Record<string, unknown>) => p.inlineData);
-    if (imagePart) {
-      return `data:image/png;base64,${imagePart.inlineData.data}`;
-    }
-  }
-  throw new Error('No image generated');
+  return generateImageFromPrompt(imageBase64, prompt);
 }
 
 /**
@@ -287,7 +301,8 @@ export async function computeRemodel(
   zone: RemodelZone,
   userPrompt: string
 ): Promise<FloorPlanData> {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const apiKey = await getApiKey();
+  const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `
     CURRENT PLAN JSON:
@@ -329,45 +344,8 @@ export async function visualizeInterior(
   imageBase64: string,
   roomName: string = 'Living Room'
 ): Promise<string> {
-  const apiKey = getApiKey();
   const prompt = PROMPTS.interior.template.replace('{room_name}', roomName);
-
-  // Clean base64 string
-  const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IMAGE_GEN}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: 'image/png', data: cleanBase64 } },
-            ],
-          },
-        ],
-        generationConfig: { responseModalities: ['IMAGE'] },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`API Error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const candidates = data.candidates;
-  if (candidates && candidates.length > 0) {
-    const parts = candidates[0].content.parts;
-    const imagePart = parts.find((p: Record<string, unknown>) => p.inlineData);
-    if (imagePart) {
-      return `data:image/png;base64,${imagePart.inlineData.data}`;
-    }
-  }
-  throw new Error('No image generated');
+  return generateImageFromPrompt(imageBase64, prompt);
 }
 
 /**
@@ -377,45 +355,8 @@ export async function visualizeInterior(
  * @returns Base64 encoded edited image
  */
 export async function editDesign(imageBase64: string, instruction: string): Promise<string> {
-  const apiKey = getApiKey();
   const prompt = PROMPTS.edit.template.replace('{instruction}', instruction);
-
-  // Clean base64 string
-  const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IMAGE_GEN}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: 'image/png', data: cleanBase64 } },
-            ],
-          },
-        ],
-        generationConfig: { responseModalities: ['IMAGE'] },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`API Error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const candidates = data.candidates;
-  if (candidates && candidates.length > 0) {
-    const parts = candidates[0].content.parts;
-    const imagePart = parts.find((p: Record<string, unknown>) => p.inlineData);
-    if (imagePart) {
-      return `data:image/png;base64,${imagePart.inlineData.data}`;
-    }
-  }
-  throw new Error('No image generated');
+  return generateImageFromPrompt(imageBase64, prompt);
 }
 
 /**
@@ -425,43 +366,6 @@ export async function editDesign(imageBase64: string, instruction: string): Prom
  * @returns Base64 encoded cinematic frame image
  */
 export async function generateVideoFrame(imageBase64: string): Promise<string> {
-  const apiKey = getApiKey();
   const prompt = `Cinematic still frame: ${PROMPTS.video.template} High motion blur, 4k.`;
-
-  // Clean base64 string
-  const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IMAGE_GEN}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: 'image/png', data: cleanBase64 } },
-            ],
-          },
-        ],
-        generationConfig: { responseModalities: ['IMAGE'] },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`API Error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const candidates = data.candidates;
-  if (candidates && candidates.length > 0) {
-    const parts = candidates[0].content.parts;
-    const imagePart = parts.find((p: Record<string, unknown>) => p.inlineData);
-    if (imagePart) {
-      return `data:image/png;base64,${imagePart.inlineData.data}`;
-    }
-  }
-  throw new Error('No image generated');
+  return generateImageFromPrompt(imageBase64, prompt);
 }

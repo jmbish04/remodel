@@ -1,6 +1,9 @@
 /**
  * Cloudflare Worker proxy for Ultimate AI Architect container
  * This worker routes requests to the Next.js container running on Cloudflare Containers
+ * 
+ * The GEMINI_API_KEY is passed to the container as an environment variable during deployment.
+ * Configure this in your wrangler.jsonc or via `wrangler secret put GEMINI_API_KEY`
  */
 
 export interface Env {
@@ -28,9 +31,6 @@ export default {
         headers: request.headers,
         body: request.body,
       });
-
-      // Pass API key to container via header (for server-side API calls)
-      containerRequest.headers.set('X-Gemini-API-Key', env.GEMINI_API_KEY || '');
 
       const response = await env.AI_ARCHITECT.fetch(containerRequest);
       return response;

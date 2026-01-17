@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import JSZip from 'jszip';
 import {
   Loader2,
   Upload,
@@ -9,22 +10,20 @@ import {
   RotateCcw,
   MessageSquare,
   Download,
-  Layers,
   Plus,
-  Map,
   CheckCircle,
   Calculator,
   History,
   Undo2,
   Clock,
   Wand2,
-  Image as ImageIcon,
   Video,
   X,
-  Eye,
-  RefreshCw,
 } from 'lucide-react';
 import ArchitectCanvas from '@/components/ArchitectCanvas';
+import PreviewImage from '@/components/PreviewImage';
+import Header from '@/components/Header';
+import FloorNameModal from '@/components/FloorNameModal';
 import {
   digitizePlan,
   generate3D,
@@ -34,7 +33,7 @@ import {
   generateVideoFrame,
   fileToBase64,
 } from '@/lib/gemini';
-import { Floor, HistoryEntry, AppStep, ChatMessage, FloorPlanData, VisualParams } from '@/types';
+import { Floor, HistoryEntry, AppStep, ChatMessage, VisualParams } from '@/types';
 
 export default function Home() {
   // Floor Management
@@ -45,6 +44,14 @@ export default function Home() {
   // Loading State
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
+
+  // Floor Name Modal State
+  const [showFloorNameModal, setShowFloorNameModal] = useState(false);
+  const [pendingFloorData, setPendingFloorData] = useState<{
+    base64: string;
+    imgUrl: string;
+    dims: { width: number; height: number };
+  } | null>(null);
 
   // Calibration Inputs
   const [calFeet, setCalFeet] = useState<string>('10');
@@ -89,47 +96,12 @@ export default function Home() {
         const imgUrl = `data:image/jpeg;base64,${base64}`;
 
         const img = new Image();
-        img.onload = async () => {
+        img.onload = () => {
           const dims = { width: img.naturalWidth, height: img.naturalHeight };
-          const floorName = prompt("Enter a name for this floor (e.g., 'Ground Floor', 'Basement'):", 'Ground Floor') || 'New Floor';
-
-          setLoadingMessage(`Digitizing ${floorName}...`);
-          try {
-            const data = await digitizePlan(base64, dims.width, dims.height);
-
-            const rulerStart = { x: dims.width * 0.3, y: dims.height * 0.5 };
-            const rulerEnd = { x: dims.width * 0.7, y: dims.height * 0.5 };
-
-            const initialVersionId = crypto.randomUUID();
-            const initialHistory: HistoryEntry = {
-              id: initialVersionId,
-              timestamp: Date.now(),
-              description: 'Original Import',
-              data: JSON.parse(JSON.stringify(data)),
-            };
-
-            const newFloor: Floor = {
-              id: crypto.randomUUID(),
-              name: floorName,
-              imageSrc: imgUrl,
-              imageDims: dims,
-              data: data,
-              scaleData: { pixelsPerFoot: 1, calibrated: false },
-              remodelZone: null,
-              calibrationRuler: { start: rulerStart, end: rulerEnd },
-              history: [initialHistory],
-              currentVersionId: initialVersionId,
-            };
-
-            setFloors((prev) => [...prev, newFloor]);
-            setActiveFloorId(newFloor.id);
-            setStep(AppStep.CALIBRATION);
-          } catch (err) {
-            console.error(err);
-            alert('AI Processing Failed. Please try again.');
-          } finally {
-            setLoading(false);
-          }
+          // Store pending data and show modal
+          setPendingFloorData({ base64, imgUrl, dims });
+          setShowFloorNameModal(true);
+          setLoading(false);
         };
         img.onerror = () => {
           alert('Failed to load image dimensions.');
@@ -138,9 +110,61 @@ export default function Home() {
         img.src = imgUrl;
       } catch (error) {
         console.error(error);
-        alert('Failed to process image file.');
+        const message = error instanceof Error ? error.message : 'Failed to process image file.';
+        alert(message);
         setLoading(false);
       }
+    }
+  };
+
+  // Handle floor name submission from modal
+  const handleFloorNameSubmit = async (floorName: string) => {
+    setShowFloorNameModal(false);
+    
+    if (!pendingFloorData) return;
+    
+    const { base64, imgUrl, dims } = pendingFloorData;
+    setPendingFloorData(null);
+    
+    setLoading(true);
+    setLoadingMessage(`Digitizing ${floorName}...`);
+    
+    try {
+      const data = await digitizePlan(base64, dims.width, dims.height);
+
+      const rulerStart = { x: dims.width * 0.3, y: dims.height * 0.5 };
+      const rulerEnd = { x: dims.width * 0.7, y: dims.height * 0.5 };
+
+      const initialVersionId = crypto.randomUUID();
+      const initialHistory: HistoryEntry = {
+        id: initialVersionId,
+        timestamp: Date.now(),
+        description: 'Original Import',
+        data: JSON.parse(JSON.stringify(data)),
+      };
+
+      const newFloor: Floor = {
+        id: crypto.randomUUID(),
+        name: floorName,
+        imageSrc: imgUrl,
+        imageDims: dims,
+        data: data,
+        scaleData: { pixelsPerFoot: 1, calibrated: false },
+        remodelZone: null,
+        calibrationRuler: { start: rulerStart, end: rulerEnd },
+        history: [initialHistory],
+        currentVersionId: initialVersionId,
+      };
+
+      setFloors((prev) => [...prev, newFloor]);
+      setActiveFloorId(newFloor.id);
+      setStep(AppStep.CALIBRATION);
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'AI Processing Failed. Please try again.';
+      alert(message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -304,85 +328,81 @@ export default function Home() {
     downloadAnchorNode.remove();
   };
 
-  const downloadPackage = () => {
-    // Create a simple package with all data
-    const packageData = {
-      floor: activeFloor?.name,
-      blueprint: activeFloor?.data,
-      scale: activeFloor?.scaleData,
-      visualizations: {
-        render3D: render3D ? 'included' : null,
-        interior: interiorView ? 'included' : null,
-        edited: editedView ? 'included' : null,
-        video: videoFrame ? 'included' : null,
-      },
-      history: activeFloor?.history,
-    };
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(packageData, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute('href', dataStr);
-    downloadAnchorNode.setAttribute('download', `${activeFloor?.name.replace(/\s/g, '_') || 'project'}_package.json`);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+  const downloadPackage = async () => {
+    if (!activeFloor) return;
+    
+    setLoading(true);
+    setLoadingMessage('Creating download package...');
+    
+    try {
+      const zip = new JSZip();
+      const floorName = activeFloor.name.replace(/\s/g, '_');
+      
+      // Add blueprint JSON
+      const blueprintData = {
+        floor: activeFloor.name,
+        blueprint: activeFloor.data,
+        scale: activeFloor.scaleData,
+        history: activeFloor.history,
+      };
+      zip.file(`${floorName}_blueprint.json`, JSON.stringify(blueprintData, null, 2));
+      
+      // Helper to extract base64 data and convert to blob
+      const base64ToBlob = (base64: string): Uint8Array => {
+        const base64Data = base64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes;
+      };
+      
+      // Add original floorplan
+      if (activeFloor.imageSrc) {
+        zip.file(`${floorName}_original.png`, base64ToBlob(activeFloor.imageSrc));
+      }
+      
+      // Add visualizations
+      if (render3D) {
+        zip.file(`${floorName}_3d_render.png`, base64ToBlob(render3D));
+      }
+      if (interiorView) {
+        zip.file(`${floorName}_interior.png`, base64ToBlob(interiorView));
+      }
+      if (editedView) {
+        zip.file(`${floorName}_edited.png`, base64ToBlob(editedView));
+      }
+      if (videoFrame) {
+        zip.file(`${floorName}_video_frame.png`, base64ToBlob(videoFrame));
+      }
+      
+      // Generate and download zip
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute('href', url);
+      downloadAnchorNode.setAttribute('download', `${floorName}_package.zip`);
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Failed to create package.';
+      alert(message);
+    } finally {
+      setLoading(false);
+    }
   };
-
-  // Preview Image Component
-  const PreviewImage = ({ src, label }: { src: string | null; label: string }) => (
-    <div className="relative group bg-gray-100 rounded-lg overflow-hidden border border-gray-200 shadow-sm aspect-video flex items-center justify-center">
-      {src ? (
-        <>
-          <img src={src} alt={label} className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
-        </>
-      ) : (
-        <div className="text-gray-400 flex flex-col items-center">
-          <ImageIcon size={32} className="mb-2 opacity-50" />
-          <span className="text-sm">Not generated</span>
-        </div>
-      )}
-      <div className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-sm px-3 py-1 text-xs font-semibold text-gray-700 border-t border-gray-100">
-        {label}
-      </div>
-    </div>
-  );
-
-  // Header Component
-  const Header = () => (
-    <header className="bg-slate-900 text-white p-4 flex justify-between items-center shadow-lg z-20">
-      <div className="flex items-center gap-3">
-        <div className="bg-blue-600 p-2 rounded-lg">
-          <Layers className="w-5 h-5 text-white" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Ultimate AI Architect</h1>
-          <p className="text-xs text-slate-400">Digitize • Calibrate • Remodel • Visualize</p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-4">
-        {activeFloor && (
-          <div className="flex items-center bg-slate-800 rounded-full px-4 py-1 gap-2">
-            <Map className="w-4 h-4 text-blue-400" />
-            <span className="text-sm font-medium">{activeFloor.name}</span>
-          </div>
-        )}
-        <button
-          onClick={() => setShowVisualizer(!showVisualizer)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
-            showVisualizer ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-          }`}
-        >
-          <Eye className="w-4 h-4" />
-          <span className="text-sm">Visualizer</span>
-        </button>
-      </div>
-    </header>
-  );
 
   return (
     <div className="flex flex-col h-screen w-full bg-slate-50">
-      <Header />
+      <Header 
+        activeFloorName={activeFloor?.name}
+        showVisualizer={showVisualizer}
+        onToggleVisualizer={() => setShowVisualizer(!showVisualizer)}
+      />
 
       <main className="flex-1 flex overflow-hidden">
         {/* Sidebar: Floor List */}
@@ -614,7 +634,6 @@ export default function Home() {
                   data={activeFloor.data}
                   mode={!activeFloor.scaleData.calibrated ? 'CALIBRATE' : 'ZONE'}
                   scaleData={activeFloor.scaleData}
-                  onDataUpdate={(newData: FloorPlanData) => handleUpdateActiveFloor({ data: newData })}
                   onZoneUpdate={(zone) => handleUpdateActiveFloor({ remodelZone: zone })}
                   onRulerUpdate={(ruler) => handleUpdateActiveFloor({ calibrationRuler: ruler })}
                   remodelZone={activeFloor.remodelZone}
@@ -731,6 +750,16 @@ export default function Home() {
           </div>
         )}
       </main>
+      
+      {/* Floor Name Modal */}
+      <FloorNameModal
+        isOpen={showFloorNameModal}
+        onClose={() => {
+          setShowFloorNameModal(false);
+          setPendingFloorData(null);
+        }}
+        onSubmit={handleFloorNameSubmit}
+      />
     </div>
   );
 }
