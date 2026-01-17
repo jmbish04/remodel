@@ -123,8 +123,8 @@ async function handleFloorUpload(file: File, projectId: string, floorName: strin
       ownerType: 'floor',
       ownerId: floor.id,
       type: 'blueprint_original',
-      width: file.width,
-      height: file.height,
+      // width and height are optional, but recommended.
+      // They must be obtained by loading the image file first.
     });
 
     console.log('Blueprint uploaded:', uploadResult.publicUrl);
