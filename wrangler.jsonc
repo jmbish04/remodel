@@ -1,26 +1,48 @@
 {
   // Cloudflare Worker configuration for proxying to the container
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "ultimate-ai-architect-proxy",
+  "name": "remodel",
   "main": "worker/index.ts",
-  "compatibility_date": "2024-01-01",
-
+  "compatibility_date": "2026-01-01",
+  "ai": {
+    "binding": "AI"
+  },
   // Container configuration
   "containers": [
     {
-      "name": "ai-architect",
-      "image": "ultimate-ai-architect:latest",
+      "name": "remodel",
+      "class_name": "RemodelApp",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
       "max_instances": 5,
-      "memory": 2048,
-      "vcpu": 1
     }
   ],
-
-  // Environment variables
-  "vars": {
-    "ENVIRONMENT": "production"
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RemodelApp",
+        "class_name": "RemodelApp"
+      }
+    ]
   },
-
-  // Secrets are configured via wrangler secret put
-  // Required secrets: GEMINI_API_KEY
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RemodelApp"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "remodel",
+      "database_id": "27b4c738-e012-467c-96a3-378c8acaeb60",
+      "remote": true,
+      "migrations_dir": "./migrations"
+    }
+  ]
 }
