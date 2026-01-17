@@ -1,5 +1,0 @@
-{
-  "name": "Smart Home Remodeler",
-  "description": "AI-powered architectural co-pilot that digitizes floor plans and generates constrained remodel layouts using Gemini Vision.",
-  "requestFramePermissions": []
-}
