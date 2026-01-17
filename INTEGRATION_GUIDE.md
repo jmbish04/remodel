@@ -133,7 +133,9 @@ async function handleFloorUpload(file: File, projectId: string, floorName: strin
     setFloors(prev => [...prev, {
       ...floor,
       imageSrc: uploadResult.publicUrl,
-      imageDims: { width: file.width, height: file.height },
+      // Note: You must first load the file into an Image object
+      // to get its dimensions before setting them here.
+      imageDims: { width: imageObject.width, height: imageObject.height },
     }]);
 
   } catch (error) {
