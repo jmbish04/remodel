@@ -106,7 +106,11 @@ test.describe('Blueprint Upload', () => {
     });
 
     // Wait for both API calls
-    await page.waitForTimeout(1000);
+    // Wait for API responses instead of a fixed timeout
+    await Promise.all([
+      page.waitForResponse(resp => resp.url().includes('/api/floors/create') && resp.status() === 200),
+      page.waitForResponse(resp => resp.url().includes('/api/images/upload') && resp.status() === 200),
+    ]);
 
     // Verify both APIs were called
     expect(floorCreated).toBe(true);
