@@ -29,7 +29,7 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragStart, setDragStart] = useState<Point | null>(null);
-  const [, setHoverPos] = useState<Point | null>(null);
+  const [activeHandle, setActiveHandle] = useState<'start' | 'end' | null>(null);
   const [activeHandle, setActiveHandle] = useState<'start' | 'end' | null>(null);
 
   // Calculate dynamic styling based on plan size
