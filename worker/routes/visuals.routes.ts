@@ -8,10 +8,6 @@ import type { Env } from '../types';
 
 const visualsRouter = new Hono<{ Bindings: Env }>();
 
-/**
- * Generates AI visual (3D render, interior view, etc.) via Gemini and uploads to CDN
- * POST /api/generate/visual
- */
 visualsRouter.post('/visual', async (c) => {
   const body = await c.req.json<{
     imageBase64: string;

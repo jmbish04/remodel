@@ -10,10 +10,6 @@ import type { Env } from '../types';
 
 const projectsRouter = new Hono<{ Bindings: Env }>();
 
-/**
- * Creates a new remodeling project
- * POST /api/projects/init
- */
 projectsRouter.post('/init', async (c) => {
   const db = drizzle(c.env.DB);
   const body = await c.req.json<{ name: string; userId?: string }>();
@@ -33,10 +29,6 @@ projectsRouter.post('/init', async (c) => {
   });
 });
 
-/**
- * Retrieves a project with all nested floors and rooms
- * GET /api/projects/:id
- */
 projectsRouter.get('/:id', async (c) => {
   const db = drizzle(c.env.DB);
   const projectId = c.req.param('id');

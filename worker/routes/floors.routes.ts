@@ -10,10 +10,6 @@ import type { Env } from '../types';
 
 const floorsRouter = new Hono<{ Bindings: Env }>();
 
-/**
- * Creates a new floor within a project
- * POST /api/floors/create
- */
 floorsRouter.post('/create', async (c) => {
   const db = drizzle(c.env.DB);
   const body = await c.req.json<{
@@ -40,10 +36,6 @@ floorsRouter.post('/create', async (c) => {
   });
 });
 
-/**
- * Syncs floor calibration data (scale ratio, orientation, stairs)
- * POST /api/floors/:id/sync
- */
 floorsRouter.post('/:id/sync', async (c) => {
   const db = drizzle(c.env.DB);
   const floorId = c.req.param('id');

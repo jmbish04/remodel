@@ -10,10 +10,6 @@ import type { Env } from '../types';
 
 const logsRouter = new Hono<{ Bindings: Env }>();
 
-/**
- * Records AI agent decision and action for audit trail
- * POST /api/logs
- */
 logsRouter.post('/', async (c) => {
   const db = drizzle(c.env.DB);
   const body = await c.req.json<{
@@ -50,10 +46,6 @@ logsRouter.post('/', async (c) => {
   });
 });
 
-/**
- * Retrieves all agent logs for a floor (audit trail)
- * GET /api/logs/:floorId
- */
 logsRouter.get('/:floorId', async (c) => {
   const db = drizzle(c.env.DB);
   const floorId = c.req.param('floorId');

@@ -9,10 +9,6 @@ import type { Env } from '../types';
 
 const snapshotsRouter = new Hono<{ Bindings: Env }>();
 
-/**
- * Saves a complete floor plan snapshot for version history and rollback
- * POST /api/snapshots
- */
 snapshotsRouter.post('/', async (c) => {
   const db = drizzle(c.env.DB);
   const body = await c.req.json<{

@@ -2,9 +2,6 @@
  * Shared types for Cloudflare Worker
  */
 
-/**
- * Worker environment bindings (secrets, D1, container)
- */
 export interface Env {
   ENVIRONMENT: string;
   GEMINI_API_KEY: string;

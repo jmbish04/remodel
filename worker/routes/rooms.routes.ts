@@ -10,10 +10,6 @@ import type { Env } from '../types';
 
 const roomsRouter = new Hono<{ Bindings: Env }>();
 
-/**
- * Creates or updates a room with dimensions and remodel goals
- * POST /api/rooms
- */
 roomsRouter.post('/', async (c) => {
   const db = drizzle(c.env.DB);
   const body = await c.req.json<{

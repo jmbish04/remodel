@@ -11,10 +11,6 @@ import type { Env } from '../types';
 
 const imagesRouter = new Hono<{ Bindings: Env }>();
 
-/**
- * Uploads an image to Cloudflare Images CDN and logs metadata to D1
- * POST /api/images/upload
- */
 imagesRouter.post('/upload', async (c) => {
   const body = await c.req.json<{
     base64Data: string;
@@ -58,10 +54,6 @@ imagesRouter.post('/upload', async (c) => {
   });
 });
 
-/**
- * Retrieves all images for a specific owner (project, floor, or room)
- * GET /api/images/:ownerType/:ownerId
- */
 imagesRouter.get('/:ownerType/:ownerId', async (c) => {
   const db = drizzle(c.env.DB);
   const ownerType = c.req.param('ownerType') as 'project' | 'floor' | 'room';

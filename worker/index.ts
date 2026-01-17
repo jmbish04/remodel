@@ -20,10 +20,8 @@ import snapshotsRoutes from './routes/snapshots.routes';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Enable CORS for all API endpoints
 app.use('/api/*', cors());
 
-// Mount route modules
 app.route('/health', healthRoutes);
 app.route('/api/projects', projectsRoutes);
 app.route('/api/floors', floorsRoutes);
@@ -33,7 +31,6 @@ app.route('/api/generate', visualsRoutes);
 app.route('/api/logs', logsRoutes);
 app.route('/api/snapshots', snapshotsRoutes);
 
-// Container Proxy - Forwards all non-API traffic to Next.js frontend
 app.all('*', async (c) => {
   try {
     const containerRequest = new Request(c.req.url, {
