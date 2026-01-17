@@ -1,18 +1,16 @@
 /**
- * Frontend API Client for Smart Home Remodeler
- * Type-safe fetch wrapper for backend API endpoints
+ * Frontend API Client
+ *
+ * Type-safe client library for communicating with the Hono API backend.
+ * All functions return strongly-typed responses and handle JSON serialization.
  */
 
-/**
- * Base API configuration
- */
 const API_BASE = '/api';
 
-/**
- * Type definitions for API requests and responses
- */
+// ============================================================================
+// Type Definitions - Database Entity Models
+// ============================================================================
 
-// Project types
 export interface Project {
   id: string;
   name: string;
@@ -25,7 +23,6 @@ export interface ProjectWithFloors extends Project {
   floors: FloorWithRooms[];
 }
 
-// Floor types
 export interface Floor {
   id: string;
   projectId: string;
@@ -54,7 +51,6 @@ export interface FloorWithRooms extends Floor {
   rooms: Room[];
 }
 
-// Room types
 export interface Room {
   id: string;
   floorId: string;
@@ -75,7 +71,6 @@ export interface Room {
   updatedAt: Date;
 }
 
-// Image types
 export interface Image {
   id: string;
   ownerType: 'project' | 'floor' | 'room';
@@ -99,7 +94,6 @@ export interface Image {
   createdAt: Date;
 }
 
-// Agent log types
 export interface AgentLog {
   id: string;
   floorId: string;
@@ -114,17 +108,13 @@ export interface AgentLog {
   timestamp: Date;
 }
 
-/**
- * Generic API response wrapper
- */
-interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
+// ============================================================================
+// Internal Utilities
+// ============================================================================
 
 /**
- * Helper function to make API calls
+ * Generic wrapper for all API fetch calls
+ * Handles JSON serialization, error parsing, and type safety
  */
 async function apiCall<T>(
   endpoint: string,
@@ -146,12 +136,16 @@ async function apiCall<T>(
   return response.json();
 }
 
+// ============================================================================
+// API Namespaces - Exported Client Methods
+// ============================================================================
+
 /**
- * Project API methods
+ * Project management operations
  */
 export const projectsApi = {
   /**
-   * Initialize a new project
+   * Creates a new remodeling project
    */
   async init(name: string, userId?: string): Promise<{ project: Project }> {
     return apiCall('/projects/init', {
@@ -161,7 +155,7 @@ export const projectsApi = {
   },
 
   /**
-   * Get project by ID with all floors and rooms
+   * Retrieves a project with all nested floors and rooms
    */
   async get(projectId: string): Promise<{ project: ProjectWithFloors }> {
     return apiCall(`/projects/${projectId}`, {
@@ -171,11 +165,11 @@ export const projectsApi = {
 };
 
 /**
- * Floor API methods
+ * Floor management operations
  */
 export const floorsApi = {
   /**
-   * Create a new floor
+   * Creates a new floor within a project
    */
   async create(
     projectId: string,
@@ -190,7 +184,7 @@ export const floorsApi = {
   },
 
   /**
-   * Update floor data (scale, orientation, stair location)
+   * Syncs floor calibration data (scale ratio, orientation, stairs)
    */
   async sync(
     floorId: string,
@@ -219,11 +213,11 @@ export const floorsApi = {
 };
 
 /**
- * Room API methods
+ * Room management operations
  */
 export const roomsApi = {
   /**
-   * Create or update a room
+   * Creates or updates a room with dimensions and remodel goals
    */
   async upsert(room: {
     id?: string;
@@ -250,11 +244,11 @@ export const roomsApi = {
 };
 
 /**
- * Image API methods
+ * Image upload and retrieval operations
  */
 export const imagesApi = {
   /**
-   * Upload a base64 image to Cloudflare Images
+   * Uploads an image to Cloudflare Images CDN
    */
   async upload(data: {
     base64Data: string;
@@ -285,7 +279,7 @@ export const imagesApi = {
   },
 
   /**
-   * Get all images for a specific owner
+   * Retrieves all images for a specific owner (project, floor, or room)
    */
   async getForOwner(
     ownerType: 'project' | 'floor' | 'room',
@@ -298,12 +292,11 @@ export const imagesApi = {
 };
 
 /**
- * Visual generation API methods
+ * AI visual generation operations
  */
 export const visualsApi = {
   /**
-   * Generate a visual (3D render, interior, etc.) using Gemini
-   * and upload the result to Cloudflare Images
+   * Generates AI visuals (3D renders, interior views, etc.) via Gemini and uploads to CDN
    */
   async generate(data: {
     imageBase64: string;
@@ -325,11 +318,11 @@ export const visualsApi = {
 };
 
 /**
- * Agent logs API methods
+ * Agent logging operations (audit trail)
  */
 export const logsApi = {
   /**
-   * Create an agent log entry
+   * Records an AI agent decision and action
    */
   async create(log: {
     floorId: string;
@@ -349,7 +342,7 @@ export const logsApi = {
   },
 
   /**
-   * Get all logs for a floor
+   * Retrieves all agent logs for a floor
    */
   async getForFloor(floorId: string): Promise<{ logs: AgentLog[] }> {
     return apiCall(`/logs/${floorId}`, {
@@ -359,11 +352,11 @@ export const logsApi = {
 };
 
 /**
- * Floor plan snapshot API methods
+ * Floor plan version history operations
  */
 export const snapshotsApi = {
   /**
-   * Save a floor plan snapshot for version history
+   * Saves a complete floor plan snapshot for rollback capability
    */
   async create(snapshot: {
     floorId: string;

@@ -1,18 +1,24 @@
 /**
  * Drizzle ORM Schema for Smart Home Remodeler
- * Tracks the full lifecycle: Projects -> Floors -> Rooms -> Images -> Agent Logs
+ *
+ * Database structure:
+ * - Projects contain Floors
+ * - Floors contain Rooms
+ * - Images attach to Projects, Floors, or Rooms (polymorphic)
+ * - Agent Logs track AI decisions for each Floor
+ * - Floor Plan Snapshots provide version history
  */
 
 import { sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 
 /**
- * Projects table - Top-level container for user projects
+ * Projects - Top-level container for remodeling projects
  */
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  userId: text('user_id').notNull(), // For future multi-user support
+  userId: text('user_id').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -22,28 +28,28 @@ export const projects = sqliteTable('projects', {
 });
 
 /**
- * Floors table - Each floor in a building
+ * Floors - Individual levels within a building (main floor, basement, etc.)
  */
 export const floors = sqliteTable('floors', {
   id: text('id').primaryKey(),
   projectId: text('project_id')
     .notNull()
     .references(() => projects.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(), // e.g., "Main Floor", "Basement"
-  scaleRatio: real('scale_ratio'), // pixels per foot
+  name: text('name').notNull(),
+  scaleRatio: real('scale_ratio'), // Calibration: pixels per foot
   isCalibrated: integer('is_calibrated', { mode: 'boolean' }).default(false),
 
-  // Orientation data stored as JSON
+  // Compass orientation and landmark positions
   orientationData: text('orientation_data', { mode: 'json' }).$type<{
     frontDoorId?: string;
     garageRect?: { x: number; y: number; width: number; height: number };
     garageWidth?: number;
-    frontAngle?: number;
+    frontAngle?: number; // Degrees from north
   }>(),
 
   isUnderground: integer('is_underground', { mode: 'boolean' }).default(false),
 
-  // Store stair location as JSON
+  // Staircase bounding box for multi-floor navigation
   stairLocation: text('stair_location', { mode: 'json' }).$type<{
     x: number;
     y: number;
@@ -51,7 +57,7 @@ export const floors = sqliteTable('floors', {
     height: number;
   }>(),
 
-  sortOrder: integer('sort_order').notNull().default(0), // For ordering floors
+  sortOrder: integer('sort_order').notNull().default(0), // Vertical ordering (0=main, 1=upper, -1=basement)
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -61,28 +67,27 @@ export const floors = sqliteTable('floors', {
 });
 
 /**
- * Rooms table - Individual rooms within floors
- * Stores both the vector polygon data and physical dimensions
+ * Rooms - Spaces within a floor with dimensions, boundaries, and remodel goals
  */
 export const rooms = sqliteTable('rooms', {
   id: text('id').primaryKey(),
   floorId: text('floor_id')
     .notNull()
     .references(() => floors.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(), // e.g., "Living Room", "Kitchen"
+  name: text('name').notNull(),
 
-  // Physical dimensions
-  widthFt: real('width_ft'), // Width in feet
-  lengthFt: real('length_ft'), // Length in feet
-  approxArea: real('approx_area'), // Approximate square footage
+  // Physical dimensions derived from calibration
+  widthFt: real('width_ft'),
+  lengthFt: real('length_ft'),
+  approxArea: real('approx_area'),
 
-  // Vector polygon data (array of {x, y} points)
+  // Vector boundary (array of {x, y} points forming closed polygon)
   polygonJson: text('polygon_json', { mode: 'json' }).$type<Array<{ x: number; y: number }>>(),
 
-  // Label position for canvas rendering
+  // Canvas label position
   labelPosition: text('label_position', { mode: 'json' }).$type<{ x: number; y: number }>(),
 
-  // Remodel goals and context (can be text or structured JSON)
+  // User's remodeling intentions (free-text or structured)
   remodelGoals: text('remodel_goals'),
   remodelGoalsJson: text('remodel_goals_json', { mode: 'json' }).$type<{
     description?: string;
@@ -100,44 +105,42 @@ export const rooms = sqliteTable('rooms', {
 });
 
 /**
- * Images table - All images (blueprints, photos, renders)
- * Unified table for all image types with Cloudflare Images integration
+ * Images - Metadata for all images stored in Cloudflare Images
+ * Supports blueprints, photos, and AI-generated renders
  */
 export const images = sqliteTable('images', {
   id: text('id').primaryKey(),
 
-  // Polymorphic owner (can be project, floor, or room)
+  // Polymorphic association: can belong to project, floor, or room
   ownerType: text('owner_type', { enum: ['project', 'floor', 'room'] }).notNull(),
-  ownerId: text('owner_id').notNull(), // References projects.id, floors.id, or rooms.id
+  ownerId: text('owner_id').notNull(),
 
-  // Cloudflare Images data
-  cloudflareId: text('cloudflare_id').notNull().unique(), // CF Images ID
-  publicUrl: text('public_url').notNull(), // Full public URL
+  // Cloudflare Images identifiers
+  cloudflareId: text('cloudflare_id').notNull().unique(),
+  publicUrl: text('public_url').notNull(),
 
-  // Image type classification
+  // Image classification
   type: text('type', {
     enum: [
-      'blueprint_original',      // Original uploaded blueprint
-      'blueprint_processed',     // AI-processed/digitized blueprint
-      'room_listing_photo',      // Pre-remodel "current state" photo
-      'render_3d',              // Generated 3D render
-      'render_interior',        // First-person interior render
-      'render_edited',          // Edited design render
-      'render_video_frame',     // Video frame from walkthrough
+      'blueprint_original',      // User-uploaded floor plan
+      'blueprint_processed',     // AI-digitized vector version
+      'room_listing_photo',      // Pre-renovation photo for context
+      'render_3d',              // Isometric/top-down 3D visualization
+      'render_interior',        // First-person room view
+      'render_edited',          // User-requested design modification
+      'render_video_frame',     // Cinematic walkthrough frame
     ],
   }).notNull(),
 
-  // Generation metadata
-  promptUsed: text('prompt_used'), // Prompt used for AI generation (if applicable)
-  generationModel: text('generation_model'), // e.g., "gemini-2.5-flash-image-preview"
+  // AI generation metadata (null for user-uploaded images)
+  promptUsed: text('prompt_used'),
+  generationModel: text('generation_model'),
 
-  // Image dimensions
+  // Image properties
   width: integer('width'),
   height: integer('height'),
-
-  // File metadata
   mimeType: text('mime_type').notNull().default('image/png'),
-  fileSize: integer('file_size'), // Size in bytes
+  fileSize: integer('file_size'),
 
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
@@ -145,8 +148,8 @@ export const images = sqliteTable('images', {
 });
 
 /**
- * Agent Logs table - Tracks AI agent thought process and actions
- * For auditing and debugging the wizard workflow
+ * Agent Logs - Audit trail of AI decisions during the wizard workflow
+ * Records reasoning, actions, and outcomes for debugging and transparency
  */
 export const agentLogs = sqliteTable('agent_logs', {
   id: text('id').primaryKey(),
@@ -154,19 +157,19 @@ export const agentLogs = sqliteTable('agent_logs', {
     .notNull()
     .references(() => floors.id, { onDelete: 'cascade' }),
 
-  // Wizard step context
-  stepName: text('step_name').notNull(), // e.g., "CALIBRATION", "DIGITIZING", "ORIENTATION"
-  stepIndex: integer('step_index'), // Numeric step order
+  // Workflow context
+  stepName: text('step_name').notNull(),
+  stepIndex: integer('step_index'),
 
-  // Agent reasoning
-  thoughtProcess: text('thought_process'), // What the agent is thinking
-  actionTaken: text('action_taken').notNull(), // What action was executed
+  // AI decision chain
+  thoughtProcess: text('thought_process'),
+  actionTaken: text('action_taken').notNull(),
 
-  // Additional context
-  inputData: text('input_data', { mode: 'json' }).$type<Record<string, unknown>>(), // Input parameters
-  outputData: text('output_data', { mode: 'json' }).$type<Record<string, unknown>>(), // Result data
+  // Execution context
+  inputData: text('input_data', { mode: 'json' }).$type<Record<string, unknown>>(),
+  outputData: text('output_data', { mode: 'json' }).$type<Record<string, unknown>>(),
 
-  // Success/error tracking
+  // Outcome tracking
   status: text('status', { enum: ['success', 'error', 'warning'] })
     .notNull()
     .default('success'),
@@ -178,8 +181,8 @@ export const agentLogs = sqliteTable('agent_logs', {
 });
 
 /**
- * Floor Plan Data table - Stores complete floor plan JSON snapshots
- * For version history and rollback capability
+ * Floor Plan Snapshots - Version history enabling rollback and comparison
+ * Captures complete floor plan state at key milestones
  */
 export const floorPlanSnapshots = sqliteTable('floor_plan_snapshots', {
   id: text('id').primaryKey(),
@@ -187,11 +190,11 @@ export const floorPlanSnapshots = sqliteTable('floor_plan_snapshots', {
     .notNull()
     .references(() => floors.id, { onDelete: 'cascade' }),
 
-  // Version metadata
+  // Version tracking
   versionNumber: integer('version_number').notNull(),
-  description: text('description'), // e.g., "After removing closet wall"
+  description: text('description'),
 
-  // Complete floor plan JSON (walls, rooms, etc.)
+  // Complete vector floor plan data
   planData: text('plan_data', { mode: 'json' }).$type<{
     walls: Array<{
       id: string;
@@ -213,7 +216,7 @@ export const floorPlanSnapshots = sqliteTable('floor_plan_snapshots', {
     height: number;
   }>(),
 
-  // Remodel zone at time of snapshot
+  // Active remodel zone when snapshot was taken
   remodelZone: text('remodel_zone', { mode: 'json' }).$type<{
     x: number;
     y: number;
@@ -227,8 +230,8 @@ export const floorPlanSnapshots = sqliteTable('floor_plan_snapshots', {
 });
 
 /**
- * TypeScript types for database entities
- * Drizzle will infer these, but we export them for convenience
+ * Exported TypeScript types for type-safe database operations
+ * Inferred from schema definitions by Drizzle ORM
  */
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;

@@ -1,13 +1,15 @@
 /**
  * Cloudflare Images Service
- * Handles uploading images to Cloudflare Images and logging metadata to D1
+ *
+ * Manages image uploads to Cloudflare Images CDN and syncs metadata to D1 database.
+ * Supports both Blob/File and base64-encoded images.
  */
 
 import { drizzle } from 'drizzle-orm/d1';
 import { images, type NewImage } from '../db/schema';
 
 /**
- * Image upload metadata
+ * Metadata required for image upload and database logging
  */
 export interface ImageMetadata {
   ownerType: 'project' | 'floor' | 'room';
@@ -27,22 +29,22 @@ export interface ImageMetadata {
 }
 
 /**
- * Upload result with public URL and DB record ID
+ * Result returned after successful image upload
  */
 export interface UploadResult {
-  id: string; // DB record ID
-  cloudflareId: string; // CF Images ID
+  id: string;
+  cloudflareId: string;
   publicUrl: string;
-  variants: string[]; // Available image variants
+  variants: string[];
 }
 
 /**
- * Upload an image to Cloudflare Images and log to database
+ * Uploads an image to Cloudflare Images and creates a D1 database record
  *
- * @param blob - Image file as Blob or File
- * @param metadata - Image metadata for database
- * @param env - Cloudflare Worker environment with bindings
- * @returns Upload result with URLs and IDs
+ * @param blob - Image file (Blob or File object)
+ * @param metadata - Classification and ownership metadata
+ * @param env - Worker environment with CF_IMAGES_TOKEN, CF_ACCOUNT_ID, and DB bindings
+ * @returns Upload result containing database ID, Cloudflare ID, and public URL
  */
 export async function uploadImage(
   blob: Blob,
@@ -53,14 +55,13 @@ export async function uploadImage(
     DB: D1Database;
   }
 ): Promise<UploadResult> {
-  // Generate unique ID for database record
   const dbId = crypto.randomUUID();
 
-  // Upload to Cloudflare Images
+  // Prepare multipart form data for Cloudflare Images API
   const formData = new FormData();
   formData.append('file', blob);
-  formData.append('id', dbId); // Use DB ID as CF Images ID for consistency
-  formData.append('requireSignedURLs', 'false'); // Public images
+  formData.append('id', dbId);
+  formData.append('requireSignedURLs', 'false');
   formData.append('metadata', JSON.stringify({
     ownerType: metadata.ownerType,
     ownerId: metadata.ownerId,
@@ -99,14 +100,10 @@ export async function uploadImage(
 
   const cloudflareId = uploadResult.result.id;
   const variants = uploadResult.result.variants;
-
-  // Construct public URL (using 'public' variant)
   const publicUrl = variants.find(v => v.includes('/public')) || variants[0];
-
-  // Get file size
   const fileSize = blob.size;
 
-  // Insert record into database
+  // Create database record with image metadata
   const db = drizzle(env.DB);
   const newImage: NewImage = {
     id: dbId,
@@ -134,13 +131,15 @@ export async function uploadImage(
 }
 
 /**
- * Upload a base64-encoded image to Cloudflare Images
- * Convenience wrapper for uploadImage that handles base64 strings
+ * Uploads a base64-encoded image to Cloudflare Images
  *
- * @param base64Data - Base64 string (with or without data URL prefix)
- * @param metadata - Image metadata
- * @param env - Cloudflare Worker environment
- * @returns Upload result
+ * Convenience wrapper that converts base64 strings to Blob before uploading.
+ * Automatically detects MIME type from data URL prefix.
+ *
+ * @param base64Data - Base64 string with optional data URL prefix (e.g., "data:image/png;base64,...")
+ * @param metadata - Classification and ownership metadata
+ * @param env - Worker environment with CF_IMAGES_TOKEN, CF_ACCOUNT_ID, and DB bindings
+ * @returns Upload result containing database ID, Cloudflare ID, and public URL
  */
 export async function uploadBase64Image(
   base64Data: string,
@@ -151,17 +150,16 @@ export async function uploadBase64Image(
     DB: D1Database;
   }
 ): Promise<UploadResult> {
-  // Clean base64 string (remove data URL prefix if present)
   const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
 
-  // Convert base64 to binary
+  // Decode base64 to binary
   const binaryString = atob(cleanBase64);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
     bytes[i] = binaryString.charCodeAt(i);
   }
 
-  // Detect MIME type from base64 prefix or default to PNG
+  // Detect MIME type from data URL prefix
   let mimeType = 'image/png';
   if (base64Data.startsWith('data:image/jpeg') || base64Data.startsWith('data:image/jpg')) {
     mimeType = 'image/jpeg';
@@ -175,10 +173,13 @@ export async function uploadBase64Image(
 }
 
 /**
- * Delete an image from both Cloudflare Images and database
+ * Deletes an image from both Cloudflare Images CDN and D1 database
  *
- * @param imageId - Database image ID
- * @param env - Cloudflare Worker environment
+ * Database deletion proceeds even if Cloudflare deletion fails to prevent orphaned records.
+ *
+ * @param imageId - Database record ID
+ * @param env - Worker environment with CF_IMAGES_TOKEN, CF_ACCOUNT_ID, and DB bindings
+ * @throws Error if image record not found in database
  */
 export async function deleteImage(
   imageId: string,
@@ -190,14 +191,13 @@ export async function deleteImage(
 ): Promise<void> {
   const db = drizzle(env.DB);
 
-  // Get image record to find Cloudflare ID
   const imageRecord = await db.select().from(images).where(images.id.eq(imageId)).get();
 
   if (!imageRecord) {
     throw new Error(`Image not found: ${imageId}`);
   }
 
-  // Delete from Cloudflare Images
+  // Attempt to delete from Cloudflare Images
   const deleteUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/images/v1/${imageRecord.cloudflareId}`;
   const deleteResponse = await fetch(deleteUrl, {
     method: 'DELETE',
@@ -212,17 +212,17 @@ export async function deleteImage(
     throw new Error('Failed to delete image from Cloudflare Images.');
   }
 
-  // Delete from database
+  // Always delete from database to prevent orphaned records
   await db.delete(images).where(images.id.eq(imageId));
 }
 
 /**
- * Get all images for a specific owner (project, floor, or room)
+ * Retrieves all images associated with a specific owner
  *
- * @param ownerType - Type of owner
- * @param ownerId - Owner ID
- * @param env - Cloudflare Worker environment
- * @returns Array of image records
+ * @param ownerType - Owner classification ('project', 'floor', or 'room')
+ * @param ownerId - Owner's database ID
+ * @param env - Worker environment with DB binding
+ * @returns Array of image records with metadata and URLs
  */
 export async function getImagesForOwner(
   ownerType: 'project' | 'floor' | 'room',

@@ -1,7 +1,9 @@
 /**
- * Cloudflare Worker with Hono API Gateway
- * Routes /api/* requests to Hono handlers
- * Proxies all other requests to the Next.js Container
+ * Cloudflare Worker - Hono API Gateway + Next.js Container Proxy
+ *
+ * Architecture:
+ * - /api/* → Hono routes (REST API for D1, Cloudflare Images, Gemini AI)
+ * - /* → Next.js container (frontend application)
  */
 
 import { Hono } from 'hono';
@@ -24,7 +26,7 @@ import { uploadImage, uploadBase64Image } from './services/imageService';
 import { eq, and } from 'drizzle-orm';
 
 /**
- * Environment bindings for Cloudflare Worker
+ * Worker environment bindings (secrets, D1, container)
  */
 export interface Env {
   ENVIRONMENT: string;
@@ -32,19 +34,19 @@ export interface Env {
   CF_IMAGES_TOKEN: string;
   CF_ACCOUNT_ID: string;
   DB: D1Database;
-  AI_ARCHITECT: Fetcher; // Container binding
+  AI_ARCHITECT: Fetcher;
 }
 
 /**
- * Hono app with type-safe environment
+ * Hono application instance with typed environment bindings
  */
 const app = new Hono<{ Bindings: Env }>();
 
-// CORS middleware for API routes
+// Enable CORS for all API endpoints
 app.use('/api/*', cors());
 
 /**
- * Middleware to inject Drizzle DB client into context
+ * Inject Drizzle ORM client into request context
  */
 app.use('/api/*', async (c, next) => {
   const db = drizzle(c.env.DB);
@@ -65,12 +67,12 @@ app.get('/health', (c) => {
 });
 
 // ============================================================================
-// API Routes
+// API Routes - Project Management
 // ============================================================================
 
 /**
+ * Creates a new remodeling project
  * POST /api/projects/init
- * Initialize a new project
  */
 app.post('/api/projects/init', async (c) => {
   const db = drizzle(c.env.DB);
@@ -92,8 +94,8 @@ app.post('/api/projects/init', async (c) => {
 });
 
 /**
+ * Creates a new floor within a project
  * POST /api/floors/create
- * Create a new floor in a project
  */
 app.post('/api/floors/create', async (c) => {
   const db = drizzle(c.env.DB);
@@ -122,8 +124,8 @@ app.post('/api/floors/create', async (c) => {
 });
 
 /**
+ * Syncs floor calibration data (scale ratio, orientation, stairs)
  * POST /api/floors/:id/sync
- * Update floor data (scale, orientation, stair location)
  */
 app.post('/api/floors/:id/sync', async (c) => {
   const db = drizzle(c.env.DB);
@@ -161,8 +163,8 @@ app.post('/api/floors/:id/sync', async (c) => {
 });
 
 /**
+ * Creates or updates a room with dimensions and remodel goals
  * POST /api/rooms
- * Create or update a room
  */
 app.post('/api/rooms', async (c) => {
   const db = drizzle(c.env.DB);
@@ -230,8 +232,8 @@ app.post('/api/rooms', async (c) => {
 });
 
 /**
+ * Uploads an image to Cloudflare Images CDN and logs metadata to D1
  * POST /api/images/upload
- * Upload an image to Cloudflare Images and log to database
  */
 app.post('/api/images/upload', async (c) => {
   const body = await c.req.json<{
@@ -277,9 +279,8 @@ app.post('/api/images/upload', async (c) => {
 });
 
 /**
+ * Generates AI visual (3D render, interior view, etc.) via Gemini and uploads to CDN
  * POST /api/generate/visual
- * Generate visual (3D render, interior, etc.) using Gemini API
- * Then upload result to Cloudflare Images and log to DB
  */
 app.post('/api/generate/visual', async (c) => {
   const body = await c.req.json<{
@@ -291,7 +292,6 @@ app.post('/api/generate/visual', async (c) => {
     model?: string;
   }>();
 
-  // Call Gemini API for image generation
   const model = body.model || 'gemini-2.5-flash-image-preview';
   const cleanBase64 = body.imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
 
@@ -352,7 +352,6 @@ app.post('/api/generate/visual', async (c) => {
 
   const generatedBase64 = `data:image/png;base64,${imagePart.inlineData.data}`;
 
-  // Upload generated image to Cloudflare Images
   const uploadResult = await uploadBase64Image(
     generatedBase64,
     {
@@ -378,8 +377,8 @@ app.post('/api/generate/visual', async (c) => {
 });
 
 /**
+ * Records AI agent decision and action for audit trail
  * POST /api/logs
- * Log agent thought process for auditing
  */
 app.post('/api/logs', async (c) => {
   const db = drizzle(c.env.DB);
@@ -418,8 +417,8 @@ app.post('/api/logs', async (c) => {
 });
 
 /**
+ * Saves a complete floor plan snapshot for version history and rollback
  * POST /api/snapshots
- * Save a floor plan snapshot for version history
  */
 app.post('/api/snapshots', async (c) => {
   const db = drizzle(c.env.DB);
@@ -474,8 +473,8 @@ app.post('/api/snapshots', async (c) => {
 });
 
 /**
+ * Retrieves a project with all nested floors and rooms
  * GET /api/projects/:id
- * Get project with all floors and rooms
  */
 app.get('/api/projects/:id', async (c) => {
   const db = drizzle(c.env.DB);
@@ -509,8 +508,8 @@ app.get('/api/projects/:id', async (c) => {
 });
 
 /**
+ * Retrieves all images for a specific owner (project, floor, or room)
  * GET /api/images/:ownerType/:ownerId
- * Get all images for a specific owner (project, floor, or room)
  */
 app.get('/api/images/:ownerType/:ownerId', async (c) => {
   const db = drizzle(c.env.DB);
@@ -530,8 +529,8 @@ app.get('/api/images/:ownerType/:ownerId', async (c) => {
 });
 
 /**
+ * Retrieves all agent logs for a floor (audit trail)
  * GET /api/logs/:floorId
- * Get all agent logs for a floor
  */
 app.get('/api/logs/:floorId', async (c) => {
   const db = drizzle(c.env.DB);
@@ -546,20 +545,17 @@ app.get('/api/logs/:floorId', async (c) => {
 });
 
 // ============================================================================
-// Container Proxy (fallback for all non-API routes)
+// Container Proxy - Forwards all non-API traffic to Next.js frontend
 // ============================================================================
 
 app.all('*', async (c) => {
   try {
-    // Forward request to Next.js container
     const containerRequest = new Request(c.req.url, {
       method: c.req.method,
       headers: c.req.raw.headers,
       body: c.req.raw.body,
     });
 
-    // Pass environment variables (including secrets) to container
-    // This enables the container to access GEMINI_API_KEY, etc.
     const response = await c.env.AI_ARCHITECT.fetch(containerRequest);
 
     return response;
