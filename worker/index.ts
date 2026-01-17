@@ -197,7 +197,7 @@ app.post('/api/rooms', async (c) => {
       remodelGoalsJson: body.remodelGoalsJson,
     };
 
-    await db.update(rooms).set(updateData).where(eq(rooms.id, body.id));
+    await db.update(rooms).set({ ...updateData, updatedAt: new Date() }).where(eq(rooms.id, body.id));
 
     return c.json({
       success: true,
