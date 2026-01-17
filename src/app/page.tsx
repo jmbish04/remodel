@@ -19,16 +19,13 @@ import {
   Wand2,
   Video,
   X,
-  ArrowRight,
-  DoorOpen,
-  ScanLine,
-  Compass,
-  Trash2,
 } from 'lucide-react';
 import ArchitectCanvas from '@/components/ArchitectCanvas';
 import PreviewImage from '@/components/PreviewImage';
 import Header from '@/components/Header';
 import FloorNameModal from '@/components/FloorNameModal';
+import ConfirmModal from '@/components/ConfirmModal';
+import WizardSidebar from '@/components/WizardSidebar';
 import {
   digitizePlan,
   generate3D,
@@ -38,7 +35,7 @@ import {
   generateVideoFrame,
   fileToBase64,
 } from '@/lib/gemini';
-import { Floor, HistoryEntry, AppStep, ChatMessage, VisualParams, Wall, Point, FloorPlanData, Rect, RulerData, OrientationData } from '@/types';
+import { Floor, HistoryEntry, AppStep, ChatMessage, VisualParams, Wall, Point, FloorPlanData, RulerData, CanvasMode } from '@/types';
 
 export default function Home() {
   // Floor Management
@@ -59,6 +56,10 @@ export default function Home() {
 
   // Selection State for Canvas interactions
   const [selectedElement, setSelectedElement] = useState<{ type: 'wall' | 'door' | null; id: string | null }>({ type: null, id: null });
+
+  // Confirm Modal State
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [pendingDoorLocation, setPendingDoorLocation] = useState<Point | null>(null);
 
   // Loading State
   const [loading, setLoading] = useState(false);
@@ -187,7 +188,7 @@ export default function Home() {
   const isWizardStep = WIZARD_STEPS.includes(step);
 
   // Determine the canvas mode based on current state
-  const getCanvasMode = (): string => {
+  const getCanvasMode = (): CanvasMode => {
     if (isWizardStep) return step;
     if (!activeFloor?.scaleData.calibrated) return 'CALIBRATE';
     if (step === AppStep.REMODEL) return AppStep.REMODEL;
@@ -315,20 +316,9 @@ export default function Home() {
     if (!activeFloor?.data) return;
 
     if (step === AppStep.CORRECTION_DOORS) {
-      // Add a new door at the clicked location
-      if (confirm('Create a new door at this location?')) {
-        saveToHistory();
-        const newDoor: Wall = {
-          id: crypto.randomUUID(),
-          start: { x: pt.x - 20, y: pt.y },
-          end: { x: pt.x + 20, y: pt.y },
-          type: 'door',
-          doorType: 'entry',
-          isExternal: false,
-        };
-        const newWalls = [...activeFloor.data.walls, newDoor];
-        handleUpdateActiveFloor({ data: { ...activeFloor.data, walls: newWalls } });
-      }
+      // Store the location and show confirm modal
+      setPendingDoorLocation(pt);
+      setShowConfirmModal(true);
     } else if (step === AppStep.LABEL_REVIEW && isAddingRoom) {
       saveToHistory();
       const newRoom = { id: crypto.randomUUID(), name: 'New Room', labelPosition: pt };
@@ -336,6 +326,29 @@ export default function Home() {
       handleUpdateActiveFloor({ data: { ...activeFloor.data, rooms: newRooms } });
       setIsAddingRoom(false);
     }
+  };
+
+  const handleConfirmAddDoor = () => {
+    if (!activeFloor?.data || !pendingDoorLocation) return;
+    saveToHistory();
+    const pt = pendingDoorLocation;
+    const newDoor: Wall = {
+      id: crypto.randomUUID(),
+      start: { x: pt.x - 20, y: pt.y },
+      end: { x: pt.x + 20, y: pt.y },
+      type: 'door',
+      doorType: 'entry',
+      isExternal: false,
+    };
+    const newWalls = [...activeFloor.data.walls, newDoor];
+    handleUpdateActiveFloor({ data: { ...activeFloor.data, walls: newWalls } });
+    setShowConfirmModal(false);
+    setPendingDoorLocation(null);
+  };
+
+  const handleCancelAddDoor = () => {
+    setShowConfirmModal(false);
+    setPendingDoorLocation(null);
   };
 
   const handleWallClick = (wall: Wall) => {
@@ -585,145 +598,18 @@ export default function Home() {
     }
   };
 
-  // --- Wizard Sidebar Component ---
-  const WizardSidebar = () => {
-    const wizardSteps = [
-      { id: AppStep.CALIBRATION, label: 'Scale' },
-      ...(totalFloors > 1 ? [{ id: AppStep.STAIR_MARKING, label: 'Stairs' }] : []),
-      { id: AppStep.CORRECTION_DOORS, label: 'Doors' },
-      { id: AppStep.CORRECTION_WALLS, label: 'Walls' },
-      { id: AppStep.STRUCTURAL_ID, label: 'Structural' },
-      { id: AppStep.EXTERIOR_CHECK, label: 'Exterior' },
-      { id: AppStep.LABEL_REVIEW, label: 'Labels' },
-      { id: AppStep.SCALE_VERIFICATION_ROOMS, label: 'Room Verify' },
-      { id: AppStep.ORIENTATION, label: 'Orientation' },
-    ];
+  // Handlers for WizardSidebar
+  const handleUpdateRoomName = (roomId: string, name: string) => {
+    if (!activeFloor?.data) return;
+    const newRooms = activeFloor.data.rooms.map((r) => (r.id === roomId ? { ...r, name } : r));
+    handleUpdateActiveFloor({ data: { ...activeFloor.data, rooms: newRooms } });
+  };
 
-    const stepOrder = wizardSteps.map((s) => s.id);
-
-    return (
-      <div className="w-80 bg-white border-r border-slate-200 flex flex-col z-10 p-6 shadow-xl overflow-y-auto">
-        <div className="mb-6">
-          <h2 className="text-xl font-bold text-slate-800 mb-1">Floor Setup</h2>
-          <p className="text-sm text-slate-500">{totalFloors > 1 ? `Floor ${currentFloorIndex + 1} of ${totalFloors}` : 'Main Floor Config'}</p>
-        </div>
-
-        <div className="flex-1 space-y-6">
-          {/* Step Progress */}
-          <div className="space-y-2 relative">
-            <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-slate-100"></div>
-            {wizardSteps.map((s, idx) => {
-              const isCurrent = step === s.id;
-              const isPast = stepOrder.indexOf(step) > stepOrder.indexOf(s.id);
-              return (
-                <div key={idx} className={`relative flex items-center gap-3 p-2 rounded-lg transition-colors ${isCurrent ? 'bg-blue-50 text-blue-800' : 'text-slate-500'}`}>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center z-10 text-xs font-bold ${isCurrent ? 'bg-blue-600 text-white' : isPast ? 'bg-green-500 text-white' : 'bg-slate-200'}`}>
-                    {isPast ? <CheckCircle className="w-3 h-3" /> : idx + 1}
-                  </div>
-                  <span className={`text-sm font-medium ${isCurrent ? 'font-bold' : ''}`}>{s.label}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Label Review Controls */}
-          {step === AppStep.LABEL_REVIEW && activeFloor?.data && (
-            <div className="border-t pt-4">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="font-bold text-sm text-slate-900">Room Labels</h3>
-                <button
-                  onClick={() => setIsAddingRoom(!isAddingRoom)}
-                  className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${isAddingRoom ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-                >
-                  <Plus className="w-3 h-3" /> Add
-                </button>
-              </div>
-
-              {isAddingRoom && <div className="text-xs text-blue-600 bg-blue-50 p-2 rounded mb-2 animate-pulse border border-blue-100">Click on the canvas to place a new label.</div>}
-
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                {activeFloor.data.rooms.map((room) => (
-                  <div key={room.id} className="flex items-center gap-2 text-sm">
-                    <input
-                      className="border rounded px-2 py-1 w-24 text-xs bg-white text-slate-900"
-                      value={room.name}
-                      onChange={(e) => {
-                        if (!activeFloor.data) return;
-                        const newRooms = activeFloor.data.rooms.map((r) => (r.id === room.id ? { ...r, name: e.target.value } : r));
-                        handleUpdateActiveFloor({ data: { ...activeFloor.data, rooms: newRooms } });
-                      }}
-                    />
-                    <button
-                      onClick={() => {
-                        if (!activeFloor.data) return;
-                        saveToHistory();
-                        const newRooms = activeFloor.data.rooms.filter((r) => r.id !== room.id);
-                        handleUpdateActiveFloor({ data: { ...activeFloor.data, rooms: newRooms } });
-                      }}
-                      className="text-red-400 hover:text-red-600 ml-auto"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Scale Verification Controls */}
-          {step === AppStep.SCALE_VERIFICATION_ROOMS && activeFloor?.data && (
-            <div className="border-t pt-4">
-              <p className="text-xs text-slate-500 mb-3">Drag the red ruler on the canvas to verify specific room dimensions.</p>
-            </div>
-          )}
-
-          {/* Orientation Controls */}
-          {step === AppStep.ORIENTATION && (
-            <div className="border-t pt-4 space-y-2">
-              <button
-                onClick={() => setOrientMode('DOOR')}
-                className={`w-full text-left px-3 py-2 rounded flex items-center gap-2 text-sm ${orientMode === 'DOOR' ? 'bg-blue-100 text-blue-800' : 'hover:bg-slate-50'}`}
-              >
-                <DoorOpen className="w-4 h-4" /> Select Front Door
-              </button>
-              <button
-                onClick={() => setOrientMode('GARAGE')}
-                className={`w-full text-left px-3 py-2 rounded flex items-center gap-2 text-sm ${orientMode === 'GARAGE' ? 'bg-purple-100 text-purple-800' : 'hover:bg-slate-50'}`}
-              >
-                <ScanLine className="w-4 h-4" /> Measure Garage Width
-              </button>
-              {activeFloor?.orientation?.garageWidth && activeFloor.orientation.garageWidth > 0 && (
-                <div className="text-xs text-purple-700 bg-purple-50 p-2 rounded ml-4 border border-purple-100">
-                  Width: <strong>{activeFloor.orientation.garageWidth.toFixed(1)} ft</strong>
-                </div>
-              )}
-              <button
-                onClick={() => setOrientMode('COMPASS')}
-                className={`w-full text-left px-3 py-2 rounded flex items-center gap-2 text-sm ${orientMode === 'COMPASS' ? 'bg-red-100 text-red-800' : 'hover:bg-slate-50'}`}
-              >
-                <Compass className="w-4 h-4" /> Set Front Direction
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-auto pt-4 border-t border-slate-100">
-          {wizardHistory.length > 0 && (
-            <button onClick={handleUndo} className="w-full mb-3 bg-slate-100 hover:bg-slate-200 text-slate-600 py-2 rounded flex items-center justify-center gap-2 text-sm font-medium transition-colors">
-              <Undo2 className="w-4 h-4" /> Undo Last Change
-            </button>
-          )}
-          {selectedElement.id && (
-            <button onClick={handleDeleteSelected} className="w-full mb-3 bg-red-100 text-red-700 p-2 rounded flex items-center justify-center gap-2 text-sm hover:bg-red-200 font-medium">
-              <Trash2 className="w-4 h-4" /> Delete Selected
-            </button>
-          )}
-          <button onClick={handleNextStep} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all active:scale-95">
-            Next Step <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    );
+  const handleDeleteRoom = (roomId: string) => {
+    if (!activeFloor?.data) return;
+    saveToHistory();
+    const newRooms = activeFloor.data.rooms.filter((r) => r.id !== roomId);
+    handleUpdateActiveFloor({ data: { ...activeFloor.data, rooms: newRooms } });
   };
 
   return (
@@ -736,7 +622,25 @@ export default function Home() {
 
       <main className="flex-1 flex overflow-hidden">
         {/* Wizard Sidebar - shown during wizard steps */}
-        {isWizardStep && activeFloor && <WizardSidebar />}
+        {isWizardStep && activeFloor && (
+          <WizardSidebar
+            step={step}
+            totalFloors={totalFloors}
+            currentFloorIndex={currentFloorIndex}
+            activeFloor={activeFloor}
+            wizardHistory={wizardHistory}
+            selectedElementId={selectedElement.id}
+            isAddingRoom={isAddingRoom}
+            orientMode={orientMode}
+            onSetIsAddingRoom={setIsAddingRoom}
+            onSetOrientMode={setOrientMode}
+            onUndo={handleUndo}
+            onDeleteSelected={handleDeleteSelected}
+            onNextStep={handleNextStep}
+            onUpdateRoomName={handleUpdateRoomName}
+            onDeleteRoom={handleDeleteRoom}
+          />
+        )}
 
         {/* Sidebar: Floor List - shown when NOT in wizard mode */}
         {!isWizardStep && (
@@ -1099,6 +1003,17 @@ export default function Home() {
           setPendingFloorData(null);
         }}
         onSubmit={handleFloorNameSubmit}
+      />
+      
+      {/* Confirm Modal for Adding Doors */}
+      <ConfirmModal
+        isOpen={showConfirmModal}
+        title="Add Door"
+        message="Create a new door at this location?"
+        confirmLabel="Add Door"
+        cancelLabel="Cancel"
+        onConfirm={handleConfirmAddDoor}
+        onCancel={handleCancelAddDoor}
       />
     </div>
   );

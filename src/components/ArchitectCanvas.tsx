@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useRef, useState } from 'react';
-import { FloorPlanData, Wall, Point, RemodelZone, ScaleData, RulerData, Rect, OrientationData, AppStep } from '@/types';
+import { FloorPlanData, Wall, Point, RemodelZone, ScaleData, RulerData, Rect, OrientationData, AppStep, CanvasMode } from '@/types';
 
 interface ArchitectCanvasProps {
   imageSrc: string | null;
   imageDims: { width: number; height: number } | null;
   data: FloorPlanData | null;
-  mode: string; // Using string to match AppStep enum values
+  mode: CanvasMode;
   scaleData: ScaleData;
 
   // State from parent
@@ -62,6 +62,9 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
   // For Wall Drawing Preview
   const [drawCurrent, setDrawCurrent] = useState<Point | null>(null);
 
+  // Local state for door dragging - only commit to parent on pointerUp
+  const [localDoorOffset, setLocalDoorOffset] = useState<{ dx: number; dy: number } | null>(null);
+
   // Calculate dynamic styling based on plan size
   const planWidth = imageDims?.width || 1000;
   const planHeight = imageDims?.height || 1000;
@@ -96,94 +99,110 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
     return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
   };
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    const pos = getMousePos(e);
-    setDragStart(pos);
-    (e.target as Element).setPointerCapture(e.pointerId);
+  // --- Mode-specific pointer down handlers ---
+  const handleOrientationPointerDown = (pos: Point): boolean => {
+    if (mode !== AppStep.ORIENTATION || !orientation || !onOrientationUpdate) return false;
+    const cx = planWidth * 0.9;
+    const cy = planHeight * 0.1;
+    const radius = 60 * uiScale;
+    const angleRad = (orientation.frontAngle || 0) * (Math.PI / 180);
+    const hx = cx + radius * Math.cos(angleRad);
+    const hy = cy + radius * Math.sin(angleRad);
 
-    // 1. Compass (Orientation)
-    if (mode === AppStep.ORIENTATION && orientation && onOrientationUpdate) {
-      const cx = planWidth * 0.9;
-      const cy = planHeight * 0.1;
-      const radius = 60 * uiScale;
-      const angleRad = (orientation.frontAngle || 0) * (Math.PI / 180);
-      const hx = cx + radius * Math.cos(angleRad);
-      const hy = cy + radius * Math.sin(angleRad);
-
-      if (Math.hypot(pos.x - hx, pos.y - hy) < handleRadius * 2) {
-        setDragMode('COMPASS');
-        return;
-      }
+    if (Math.hypot(pos.x - hx, pos.y - hy) < handleRadius * 2) {
+      setDragMode('COMPASS');
+      return true;
     }
+    return false;
+  };
 
-    // 2. Calibration Ruler
+  const handleRulerPointerDown = (pos: Point): boolean => {
     if (mode === AppStep.CALIBRATION || mode === AppStep.SCALE_VERIFICATION_ROOMS || mode === 'CALIBRATE') {
       const distStart = Math.hypot(pos.x - calibrationRuler.start.x, pos.y - calibrationRuler.start.y);
       const distEnd = Math.hypot(pos.x - calibrationRuler.end.x, pos.y - calibrationRuler.end.y);
-      if (distStart < handleRadius * 2) { setDragMode('RULER_CALIB'); setActiveHandle('start'); return; }
-      if (distEnd < handleRadius * 2) { setDragMode('RULER_CALIB'); setActiveHandle('end'); return; }
+      if (distStart < handleRadius * 2) {
+        setDragMode('RULER_CALIB');
+        setActiveHandle('start');
+        return true;
+      }
+      if (distEnd < handleRadius * 2) {
+        setDragMode('RULER_CALIB');
+        setActiveHandle('end');
+        return true;
+      }
     }
-
-    // Garage Ruler
     if (mode === AppStep.ORIENTATION && garageRuler) {
       const distStart = Math.hypot(pos.x - garageRuler.start.x, pos.y - garageRuler.start.y);
       const distEnd = Math.hypot(pos.x - garageRuler.end.x, pos.y - garageRuler.end.y);
-      if (distStart < handleRadius * 2) { setDragMode('RULER_GARAGE'); setActiveHandle('start'); return; }
-      if (distEnd < handleRadius * 2) { setDragMode('RULER_GARAGE'); setActiveHandle('end'); return; }
-    }
-
-    // 3. Stair Mode
-    if (mode === AppStep.STAIR_MARKING && stairRect && onStairUpdate) {
-      const handles = [
-        { id: 'tl', x: stairRect.x, y: stairRect.y },
-        { id: 'tr', x: stairRect.x + stairRect.width, y: stairRect.y },
-        { id: 'bl', x: stairRect.x, y: stairRect.y + stairRect.height },
-        { id: 'br', x: stairRect.x + stairRect.width, y: stairRect.y + stairRect.height },
-        { id: 'center', x: stairRect.x + stairRect.width / 2, y: stairRect.y + stairRect.height / 2 },
-      ];
-      for (const h of handles) {
-        if (Math.hypot(pos.x - h.x, pos.y - h.y) < handleRadius * 2) {
-          setDragMode('STAIR');
-          setActiveHandle(h.id);
-          return;
-        }
+      if (distStart < handleRadius * 2) {
+        setDragMode('RULER_GARAGE');
+        setActiveHandle('start');
+        return true;
+      }
+      if (distEnd < handleRadius * 2) {
+        setDragMode('RULER_GARAGE');
+        setActiveHandle('end');
+        return true;
       }
     }
+    return false;
+  };
 
-    // 4. Correction Doors
-    if (mode === AppStep.CORRECTION_DOORS && data) {
-      const clickedDoor = data.walls.find(
-        (w) => w.type === 'door' && Math.hypot(pos.x - (w.start.x + w.end.x) / 2, pos.y - (w.start.y + w.end.y) / 2) < handleRadius * 1.5
-      );
-      if (clickedDoor) {
-        setDragMode('DOOR');
-        setActiveHandle(clickedDoor.id);
-        if (onSelect) onSelect('door', clickedDoor.id);
-        return;
+  const handleStairPointerDown = (pos: Point): boolean => {
+    if (mode !== AppStep.STAIR_MARKING || !stairRect || !onStairUpdate) return false;
+    const handles = [
+      { id: 'tl', x: stairRect.x, y: stairRect.y },
+      { id: 'tr', x: stairRect.x + stairRect.width, y: stairRect.y },
+      { id: 'bl', x: stairRect.x, y: stairRect.y + stairRect.height },
+      { id: 'br', x: stairRect.x + stairRect.width, y: stairRect.y + stairRect.height },
+      { id: 'center', x: stairRect.x + stairRect.width / 2, y: stairRect.y + stairRect.height / 2 },
+    ];
+    for (const h of handles) {
+      if (Math.hypot(pos.x - h.x, pos.y - h.y) < handleRadius * 2) {
+        setDragMode('STAIR');
+        setActiveHandle(h.id);
+        return true;
       }
     }
+    return false;
+  };
 
-    // 5. Correction Walls - Drawing
-    if (mode === AppStep.CORRECTION_WALLS) {
-      const clickedWall = data?.walls.find((w) => distToSegment(pos, w.start, w.end) < wallStrokeExt);
-      if (clickedWall) {
-        if (onSelect) onSelect('wall', clickedWall.id);
-        if (onWallClick) onWallClick(clickedWall);
-        return;
-      }
-      setDragMode('DRAWING');
-      setDrawCurrent(pos);
-      return;
+  const handleDoorPointerDown = (pos: Point): boolean => {
+    if (mode !== AppStep.CORRECTION_DOORS || !data) return false;
+    const clickedDoor = data.walls.find(
+      (w) => w.type === 'door' && Math.hypot(pos.x - (w.start.x + w.end.x) / 2, pos.y - (w.start.y + w.end.y) / 2) < handleRadius * 1.5
+    );
+    if (clickedDoor) {
+      setDragMode('DOOR');
+      setActiveHandle(clickedDoor.id);
+      setLocalDoorOffset({ dx: 0, dy: 0 });
+      if (onSelect) onSelect('door', clickedDoor.id);
+      return true;
     }
+    return false;
+  };
 
-    // 6. Zone
-    if (mode === AppStep.REMODEL || mode === 'ZONE') {
-      onZoneUpdate({ x: pos.x, y: pos.y, width: 0, height: 0 });
-      setDragMode('ZONE');
-      return;
+  const handleWallDrawingPointerDown = (pos: Point): boolean => {
+    if (mode !== AppStep.CORRECTION_WALLS) return false;
+    const clickedWall = data?.walls.find((w) => distToSegment(pos, w.start, w.end) < wallStrokeExt);
+    if (clickedWall) {
+      if (onSelect) onSelect('wall', clickedWall.id);
+      if (onWallClick) onWallClick(clickedWall);
+      return true;
     }
+    setDragMode('DRAWING');
+    setDrawCurrent(pos);
+    return true;
+  };
 
-    // General Click for other wizard modes
+  const handleZonePointerDown = (pos: Point): boolean => {
+    if (mode !== AppStep.REMODEL && mode !== 'ZONE') return false;
+    onZoneUpdate({ x: pos.x, y: pos.y, width: 0, height: 0 });
+    setDragMode('ZONE');
+    return true;
+  };
+
+  const handleGeneralClick = (pos: Point): void => {
     if (mode === AppStep.STRUCTURAL_ID || mode === AppStep.ORIENTATION || mode === AppStep.CORRECTION_DOORS) {
       const clickedWall = data?.walls.find((w) => distToSegment(pos, w.start, w.end) < wallStrokeExt * 1.5);
       if (clickedWall) {
@@ -194,11 +213,115 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
         if (onSelect) onSelect(null, null);
       }
     }
-
-    // Label Review - add room on canvas click
     if (mode === AppStep.LABEL_REVIEW) {
       if (onCanvasClick) onCanvasClick(pos);
     }
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    const pos = getMousePos(e);
+    setDragStart(pos);
+    (e.target as Element).setPointerCapture(e.pointerId);
+
+    // Try each mode-specific handler in order
+    if (handleOrientationPointerDown(pos)) return;
+    if (handleRulerPointerDown(pos)) return;
+    if (handleStairPointerDown(pos)) return;
+    if (handleDoorPointerDown(pos)) return;
+    if (handleWallDrawingPointerDown(pos)) return;
+    if (handleZonePointerDown(pos)) return;
+    
+    // Fallback to general click handling
+    handleGeneralClick(pos);
+  };
+
+  // --- Mode-specific pointer move handlers ---
+  const handleCompassMove = (pos: Point): void => {
+    if (!onOrientationUpdate || !orientation) return;
+    const cx = planWidth * 0.9;
+    const cy = planHeight * 0.1;
+    const dx = pos.x - cx;
+    const dy = pos.y - cy;
+    let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    if (angle < 0) angle += 360;
+    onOrientationUpdate({ ...orientation, frontAngle: angle });
+  };
+
+  const handleRulerMove = (pos: Point): void => {
+    if (dragMode === 'RULER_CALIB' && activeHandle) {
+      const newRuler = { ...calibrationRuler };
+      if (activeHandle === 'start') newRuler.start = pos;
+      if (activeHandle === 'end') newRuler.end = pos;
+      onRulerUpdate(newRuler, 'calibration');
+    }
+    if (dragMode === 'RULER_GARAGE' && activeHandle && garageRuler) {
+      const newRuler = { ...garageRuler };
+      if (activeHandle === 'start') newRuler.start = pos;
+      if (activeHandle === 'end') newRuler.end = pos;
+      onRulerUpdate(newRuler, 'garage');
+    }
+  };
+
+  const handleStairMove = (pos: Point): void => {
+    if (!activeHandle || !onStairUpdate || !stairRect || !dragStart) return;
+    const newRect = { ...stairRect };
+    if (activeHandle === 'center') {
+      const dx = pos.x - dragStart.x;
+      const dy = pos.y - dragStart.y;
+      newRect.x += dx;
+      newRect.y += dy;
+      setDragStart(pos);
+    } else {
+      if (activeHandle.includes('l')) {
+        const diff = pos.x - newRect.x;
+        newRect.x += diff;
+        newRect.width -= diff;
+      }
+      if (activeHandle.includes('r')) {
+        newRect.width = pos.x - newRect.x;
+      }
+      if (activeHandle.includes('t')) {
+        const diff = pos.y - newRect.y;
+        newRect.y += diff;
+        newRect.height -= diff;
+      }
+      if (activeHandle.includes('b')) {
+        newRect.height = pos.y - newRect.y;
+      }
+      if (newRect.width < 10) newRect.width = 10;
+      if (newRect.height < 10) newRect.height = 10;
+    }
+    onStairUpdate(newRect);
+  };
+
+  const handleDoorMove = (pos: Point): void => {
+    if (!activeHandle || !dragStart) return;
+    // Update local offset only - don't call parent on every move
+    const dx = pos.x - dragStart.x;
+    const dy = pos.y - dragStart.y;
+    setLocalDoorOffset({ dx, dy });
+  };
+
+  const handleDrawingMove = (pos: Point): void => {
+    if (!dragStart) return;
+    const dx = Math.abs(pos.x - dragStart.x);
+    const dy = Math.abs(pos.y - dragStart.y);
+    const endP = { ...pos };
+    if (dx > dy) endP.y = dragStart.y;
+    else endP.x = dragStart.x;
+    setDrawCurrent(endP);
+  };
+
+  const handleZoneMove = (pos: Point): void => {
+    if (!dragStart) return;
+    const width = pos.x - dragStart.x;
+    const height = pos.y - dragStart.y;
+    onZoneUpdate({
+      x: width < 0 ? pos.x : dragStart.x,
+      y: height < 0 ? pos.y : dragStart.y,
+      width: Math.abs(width),
+      height: Math.abs(height),
+    });
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -206,107 +329,57 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
 
     if (!dragMode || !dragStart) return;
 
-    if (dragMode === 'COMPASS' && onOrientationUpdate && orientation) {
-      const cx = planWidth * 0.9;
-      const cy = planHeight * 0.1;
-      const dx = pos.x - cx;
-      const dy = pos.y - cy;
-      let angle = Math.atan2(dy, dx) * (180 / Math.PI);
-      if (angle < 0) angle += 360;
-      onOrientationUpdate({ ...orientation, frontAngle: angle });
-    }
-
-    if (dragMode === 'RULER_CALIB' && activeHandle) {
-      const newRuler = { ...calibrationRuler };
-      if (activeHandle === 'start') newRuler.start = pos;
-      if (activeHandle === 'end') newRuler.end = pos;
-      onRulerUpdate(newRuler, 'calibration');
-    }
-
-    if (dragMode === 'RULER_GARAGE' && activeHandle && garageRuler) {
-      const newRuler = { ...garageRuler };
-      if (activeHandle === 'start') newRuler.start = pos;
-      if (activeHandle === 'end') newRuler.end = pos;
-      onRulerUpdate(newRuler, 'garage');
-    }
-
-    if (dragMode === 'STAIR' && activeHandle && onStairUpdate && stairRect) {
-      const newRect = { ...stairRect };
-      if (activeHandle === 'center') {
-        const dx = pos.x - dragStart.x;
-        const dy = pos.y - dragStart.y;
-        newRect.x += dx;
-        newRect.y += dy;
-        setDragStart(pos);
-      } else {
-        if (activeHandle.includes('l')) {
-          const diff = pos.x - newRect.x;
-          newRect.x += diff;
-          newRect.width -= diff;
-        }
-        if (activeHandle.includes('r')) {
-          newRect.width = pos.x - newRect.x;
-        }
-        if (activeHandle.includes('t')) {
-          const diff = pos.y - newRect.y;
-          newRect.y += diff;
-          newRect.height -= diff;
-        }
-        if (activeHandle.includes('b')) {
-          newRect.height = pos.y - newRect.y;
-        }
-        if (newRect.width < 10) newRect.width = 10;
-        if (newRect.height < 10) newRect.height = 10;
-      }
-      onStairUpdate(newRect);
-    }
-
-    if (dragMode === 'DOOR' && activeHandle && data && onDataUpdate) {
-      const dx = pos.x - dragStart.x;
-      const dy = pos.y - dragStart.y;
-      const newWalls = data.walls.map((w) => {
-        if (w.id === activeHandle) {
-          return {
-            ...w,
-            start: { x: w.start.x + dx, y: w.start.y + dy },
-            end: { x: w.end.x + dx, y: w.end.y + dy },
-          };
-        }
-        return w;
-      });
-      onDataUpdate({ ...data, walls: newWalls });
-      setDragStart(pos);
-    }
-
-    if (dragMode === 'DRAWING') {
-      const dx = Math.abs(pos.x - dragStart.x);
-      const dy = Math.abs(pos.y - dragStart.y);
-      const endP = { ...pos };
-      if (dx > dy) endP.y = dragStart.y;
-      else endP.x = dragStart.x;
-      setDrawCurrent(endP);
-    }
-
-    if (dragMode === 'ZONE') {
-      const width = pos.x - dragStart.x;
-      const height = pos.y - dragStart.y;
-      onZoneUpdate({
-        x: width < 0 ? pos.x : dragStart.x,
-        y: height < 0 ? pos.y : dragStart.y,
-        width: Math.abs(width),
-        height: Math.abs(height),
-      });
+    switch (dragMode) {
+      case 'COMPASS':
+        handleCompassMove(pos);
+        break;
+      case 'RULER_CALIB':
+      case 'RULER_GARAGE':
+        handleRulerMove(pos);
+        break;
+      case 'STAIR':
+        handleStairMove(pos);
+        break;
+      case 'DOOR':
+        handleDoorMove(pos);
+        break;
+      case 'DRAWING':
+        handleDrawingMove(pos);
+        break;
+      case 'ZONE':
+        handleZoneMove(pos);
+        break;
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    // Commit door position change to parent only on pointer up
+    if (dragMode === 'DOOR' && activeHandle && data && onDataUpdate && localDoorOffset) {
+      const { dx, dy } = localDoorOffset;
+      if (dx !== 0 || dy !== 0) {
+        const newWalls = data.walls.map((w) => {
+          if (w.id === activeHandle) {
+            return {
+              ...w,
+              start: { x: w.start.x + dx, y: w.start.y + dy },
+              end: { x: w.end.x + dx, y: w.end.y + dy },
+            };
+          }
+          return w;
+        });
+        onDataUpdate({ ...data, walls: newWalls });
+      }
+    }
+    
     if (dragMode === 'DRAWING' && dragStart && drawCurrent && onWallDraw) {
       onWallDraw(dragStart, drawCurrent);
     }
+    
     setDragStart(null);
     setDragMode(null);
     setActiveHandle(null);
     setDrawCurrent(null);
+    setLocalDoorOffset(null);
     (e.target as Element).releasePointerCapture(e.pointerId);
   };
 
@@ -353,27 +426,32 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
           if (!wall?.start || !wall?.end) return null;
           const isSelected = selectedId === wall.id;
           const strokeColor = getWallColor(wall);
+          
+          // Apply local door offset for visual feedback during drag
+          const isDragging = dragMode === 'DOOR' && activeHandle === wall.id && localDoorOffset;
+          const offsetX = isDragging ? localDoorOffset.dx : 0;
+          const offsetY = isDragging ? localDoorOffset.dy : 0;
 
           return (
             <g key={`wall-${idx}`}>
               <line
-                x1={wall.start.x}
-                y1={wall.start.y}
-                x2={wall.end.x}
-                y2={wall.end.y}
+                x1={wall.start.x + offsetX}
+                y1={wall.start.y + offsetY}
+                x2={wall.end.x + offsetX}
+                y2={wall.end.y + offsetY}
                 stroke={strokeColor}
                 strokeWidth={wall.isExternal ? wallStrokeExt : wallStroke}
                 strokeLinecap="round"
                 className="transition-colors duration-200"
               />
               {wall.type === 'window' && (
-                <line x1={wall.start.x} y1={wall.start.y} x2={wall.end.x} y2={wall.end.y} stroke="#0ea5e9" strokeWidth={wallStroke * 0.6} />
+                <line x1={wall.start.x + offsetX} y1={wall.start.y + offsetY} x2={wall.end.x + offsetX} y2={wall.end.y + offsetY} stroke="#0ea5e9" strokeWidth={wallStroke * 0.6} />
               )}
               {wall.type === 'door' && (
                 <g className={mode === AppStep.CORRECTION_DOORS ? 'cursor-move' : ''}>
                   <circle
-                    cx={(wall.start.x + wall.end.x) / 2}
-                    cy={(wall.start.y + wall.end.y) / 2}
+                    cx={(wall.start.x + wall.end.x) / 2 + offsetX}
+                    cy={(wall.start.y + wall.end.y) / 2 + offsetY}
                     r={handleRadius * 0.8}
                     fill={isSelected ? 'rgba(59, 130, 246, 0.2)' : 'white'}
                     stroke={isSelected ? '#3b82f6' : '#eab308'}
@@ -381,8 +459,8 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
                   />
                   {wall.doorType && (
                     <text
-                      x={(wall.start.x + wall.end.x) / 2}
-                      y={(wall.start.y + wall.end.y) / 2}
+                      x={(wall.start.x + wall.end.x) / 2 + offsetX}
+                      y={(wall.start.y + wall.end.y) / 2 + offsetY}
                       dy={-handleRadius}
                       textAnchor="middle"
                       fontSize={fontSize * 0.5}

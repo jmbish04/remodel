@@ -127,8 +127,8 @@ export enum AppStep {
   VISUALIZE = 'VISUALIZE',
 }
 
-// Canvas interaction modes
-export type CanvasMode = 'VIEW' | 'CALIBRATE' | 'ZONE' | 'EDIT';
+// Canvas interaction modes - includes AppStep values for wizard modes
+export type CanvasMode = AppStep | 'CALIBRATE' | 'ZONE';
 
 // Chat message
 export interface ChatMessage {
