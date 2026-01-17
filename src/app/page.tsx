@@ -170,17 +170,29 @@ export default function Home() {
     }
   };
 
+  // Wizard steps constant for reuse
+  const WIZARD_STEPS = [
+    AppStep.CALIBRATION,
+    AppStep.STAIR_MARKING,
+    AppStep.CORRECTION_DOORS,
+    AppStep.CORRECTION_WALLS,
+    AppStep.STRUCTURAL_ID,
+    AppStep.EXTERIOR_CHECK,
+    AppStep.LABEL_REVIEW,
+    AppStep.SCALE_VERIFICATION_ROOMS,
+    AppStep.ORIENTATION,
+  ];
+
   // Check if we're in wizard mode
-  const isWizardStep =
-    step === AppStep.CALIBRATION ||
-    step === AppStep.STAIR_MARKING ||
-    step === AppStep.CORRECTION_DOORS ||
-    step === AppStep.CORRECTION_WALLS ||
-    step === AppStep.STRUCTURAL_ID ||
-    step === AppStep.EXTERIOR_CHECK ||
-    step === AppStep.LABEL_REVIEW ||
-    step === AppStep.SCALE_VERIFICATION_ROOMS ||
-    step === AppStep.ORIENTATION;
+  const isWizardStep = WIZARD_STEPS.includes(step);
+
+  // Determine the canvas mode based on current state
+  const getCanvasMode = (): string => {
+    if (isWizardStep) return step;
+    if (!activeFloor?.scaleData.calibrated) return 'CALIBRATE';
+    if (step === AppStep.REMODEL) return AppStep.REMODEL;
+    return 'ZONE';
+  };
 
   // File Upload Handler
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -333,8 +345,10 @@ export default function Home() {
       handleUpdateActiveFloor({ orientation: { ...activeFloor.orientation, frontDoorId: wall.id } });
     } else if (step === AppStep.STRUCTURAL_ID) {
       saveToHistory();
+      // Toggle structural status: if not load bearing, mark as load bearing (and external)
+      // If already load bearing, unmark it
       const newWalls = activeFloor.data.walls.map((w) =>
-        w.id === wall.id ? { ...w, isLoadBearing: !w.isLoadBearing, isExternal: !w.isExternal } : w
+        w.id === wall.id ? { ...w, isLoadBearing: !w.isLoadBearing } : w
       );
       handleUpdateActiveFloor({ data: { ...activeFloor.data, walls: newWalls } });
     }
@@ -947,7 +961,7 @@ export default function Home() {
                   imageSrc={activeFloor.imageSrc}
                   imageDims={activeFloor.imageDims}
                   data={activeFloor.data}
-                  mode={isWizardStep ? step : !activeFloor.scaleData.calibrated ? 'CALIBRATE' : step === AppStep.REMODEL ? AppStep.REMODEL : 'ZONE'}
+                  mode={getCanvasMode()}
                   scaleData={activeFloor.scaleData}
                   onDataUpdate={(data) => handleUpdateActiveFloor({ data })}
                   onZoneUpdate={(zone) => handleUpdateActiveFloor({ remodelZone: zone })}
