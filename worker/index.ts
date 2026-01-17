@@ -152,7 +152,7 @@ app.post('/api/floors/:id/sync', async (c) => {
   if (body.orientationData !== undefined) updateData.orientationData = body.orientationData;
   if (body.stairLocation !== undefined) updateData.stairLocation = body.stairLocation;
 
-  await db.update(floors).set(updateData).where(eq(floors.id, floorId));
+  await db.update(floors).set({ ...updateData, updatedAt: new Date() }).where(eq(floors.id, floorId));
 
   return c.json({
     success: true,
