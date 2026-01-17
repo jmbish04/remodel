@@ -100,7 +100,7 @@ export default function Home() {
     instruction: 'Add a modern red leather sofa to the center',
   });
 
-  // Planner State
+  // React-planner State (professional floor plan editor used in REMODEL step)
   const [plannerState, setPlannerState] = useState<any>(null);
 
   // Visual Results
@@ -147,7 +147,10 @@ export default function Home() {
     setIsAddingRoom(false);
   }, [activeFloorId, step]);
 
-  // Initialize planner state when entering REMODEL step
+  /**
+   * Convert FloorPlanData to react-planner state when entering REMODEL step.
+   * This allows the professional editor to visualize the AI-generated floor plan.
+   */
   useEffect(() => {
     if (step === AppStep.REMODEL && activeFloor?.data && !plannerState) {
       const initialPlannerState = adaptGeminiToPlanner(activeFloor.data);
@@ -548,7 +551,7 @@ export default function Home() {
         currentVersionId: newVersionId,
       });
 
-      // Update planner state with new floor plan
+      // Synchronize AI-generated changes to react-planner for visual update
       if (step === AppStep.REMODEL) {
         const newPlannerState = adaptGeminiToPlanner(newPlan);
         setPlannerState(newPlannerState);
@@ -1085,13 +1088,18 @@ export default function Home() {
 
               {/* Canvas Container */}
               <div className="flex-1 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden relative">
+                {/*
+                  Conditional Canvas Rendering:
+                  - Wizard Steps (UPLOAD → ORIENTATION): ArchitectCanvas (SVG overlay on floor plan image)
+                  - REMODEL Step: PlannerWrapper (professional CAD editor with 2D/3D views)
+                */}
                 {step === AppStep.REMODEL ? (
                   <PlannerWrapper
                     width={typeof window !== 'undefined' ? window.innerWidth - 400 : 800}
                     height={typeof window !== 'undefined' ? window.innerHeight - 200 : 600}
                     initialState={plannerState || (activeFloor.data ? adaptGeminiToPlanner(activeFloor.data) : null)}
                     onStateChange={(newState) => {
-                      // Convert planner state back to FloorPlanData when user makes changes
+                      // Bidirectional sync: Convert react-planner edits back to FloorPlanData
                       const newFloorData = adaptPlannerToGemini(newState);
                       handleUpdateActiveFloor({ data: newFloorData });
                     }}

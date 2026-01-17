@@ -5,8 +5,11 @@ import { createStore, combineReducers, Store } from 'redux';
 import { Provider } from 'react-redux';
 import dynamic from 'next/dynamic';
 
-// Dynamic import of react-planner to avoid SSR issues
-// react-planner uses window and other browser-only APIs
+/**
+ * Dynamically import react-planner to avoid Next.js SSR issues.
+ * react-planner relies on browser-only APIs (window, document) which are
+ * not available during server-side rendering.
+ */
 const ReactPlannerComponent = dynamic(
   () => import('./react-planner-src/index.js').then((mod) => mod.ReactPlanner),
   {
@@ -30,16 +33,23 @@ interface PlannerWrapperProps {
 }
 
 /**
- * PlannerWrapper Component
+ * Next.js-compatible wrapper for the react-planner library.
  *
- * A Next.js-compatible wrapper for the react-planner library.
- * Handles Redux store initialization, SSR compatibility, and state management.
+ * This component bridges the gap between react-planner (an older React library)
+ * and Next.js 15 by handling Redux store initialization, preventing SSR issues,
+ * and managing bidirectional state synchronization.
  *
- * Features:
- * - Redux store with react-planner reducer
- * - Dynamic import to prevent SSR issues
- * - State extraction and change callbacks
- * - Catalog initialization
+ * Key Responsibilities:
+ * - Initialize Redux store with react-planner reducer in browser environment
+ * - Load react-planner modules dynamically to avoid SSR hydration errors
+ * - Provide state extraction for react-planner's internal architecture
+ * - Synchronize planner state changes back to parent component
+ * - Initialize catalog with default architectural elements (walls, doors, etc.)
+ *
+ * @param width - Canvas width in pixels (default: 800)
+ * @param height - Canvas height in pixels (default: 600)
+ * @param initialState - Initial react-planner state (from FloorPlanData adapter)
+ * @param onStateChange - Callback fired when user modifies the floor plan
  */
 export default function PlannerWrapper({
   width = 800,
@@ -52,37 +62,39 @@ export default function PlannerWrapper({
   const [reducer, setReducer] = useState<any>(null);
   const [Plugins, setPlugins] = useState<any>(null);
 
-  // Initialize Redux store and catalog
+  /**
+   * Initialize Redux store, catalog, and plugins after component mounts.
+   * This runs only in the browser to avoid SSR issues.
+   */
   useEffect(() => {
-    // Dynamically import react-planner modules (browser-only)
     const initializePlanner = async () => {
       try {
+        // Lazy-load react-planner modules (client-side only)
         const plannerModule = await import('./react-planner-src/index.js');
-
-        // Extract necessary exports
         const { reducer: plannerReducer, Catalog, Plugins: PlannerPlugins } = plannerModule;
 
-        // Create Redux store with planner reducer
+        // Wrap planner reducer to ensure state initialization
         const reactPlannerReducer = (state: any, action: any) => {
           state = state || {};
           state = plannerReducer(state, action);
           return state;
         };
 
+        // Create root reducer with 'react-planner' namespace
         const rootReducer = combineReducers({
           'react-planner': reactPlannerReducer,
         });
 
+        // Create Redux store with optional DevTools support
         const newStore = createStore(
           rootReducer,
           initialState ? { 'react-planner': initialState } : undefined,
-          // Enable Redux DevTools if available
           typeof window !== 'undefined' && (window as any).__REDUX_DEVTOOLS_EXTENSION__
             ? (window as any).__REDUX_DEVTOOLS_EXTENSION__()
             : undefined
         );
 
-        // Initialize catalog with default elements
+        // Initialize empty catalog (can be extended with custom elements)
         const newCatalog = new Catalog();
 
         setStore(newStore);
@@ -90,7 +102,7 @@ export default function PlannerWrapper({
         setReducer(() => plannerReducer);
         setPlugins(PlannerPlugins);
 
-        // Subscribe to store changes
+        // Subscribe to state changes for parent component synchronization
         if (onStateChange) {
           newStore.subscribe(() => {
             const state = newStore.getState();
@@ -105,12 +117,16 @@ export default function PlannerWrapper({
     initializePlanner();
   }, [initialState, onStateChange]);
 
-  // State extractor function for ReactPlanner
+  /**
+   * Extract react-planner state from Redux store.
+   * react-planner expects its state to be at root level, but we namespace it
+   * under 'react-planner' to avoid conflicts with other reducers.
+   */
   const stateExtractor = (state: any) => {
     return state['react-planner'] || state;
   };
 
-  // Don't render until store is initialized
+  // Show loading state until all dependencies are initialized
   if (!store || !catalog || !Plugins) {
     return (
       <div className="flex items-center justify-center h-full bg-gray-100">
