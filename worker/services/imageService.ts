@@ -234,6 +234,6 @@ export async function getImagesForOwner(
   return db
     .select()
     .from(images)
-    .where(images.ownerType.eq(ownerType).and(images.ownerId.eq(ownerId)))
+    .where(and(eq(images.ownerType, ownerType), eq(images.ownerId, ownerId)))
     .all();
 }
