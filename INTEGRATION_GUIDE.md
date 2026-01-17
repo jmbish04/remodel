@@ -77,7 +77,7 @@ export default function Home() {
     async function initProject() {
       try {
         // Check localStorage for existing project ID
-        const storedProjectId = localStorage.getItem('currentProjectId');
+        const storedProjectId = localStorage.getItem('projectId');
 
         if (storedProjectId) {
           // Load existing project
@@ -87,7 +87,7 @@ export default function Home() {
           // Create new project
           const { project } = await projectsApi.init('My Smart Home Remodel');
           setProjectId(project.id);
-          localStorage.setItem('currentProjectId', project.id);
+          localStorage.setItem('projectId', project.id);
         }
       } catch (error) {
         console.error('Failed to initialize project:', error);
