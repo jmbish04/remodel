@@ -1,12 +1,36 @@
 {
-  // Cloudflare Worker configuration for proxying to the container
+  // Cloudflare Worker configuration with Hono API + Container Proxy
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "remodel",
   "main": "worker/index.ts",
   "compatibility_date": "2026-01-01",
+
+  // Build configuration for TypeScript worker
+  "build": {
+    "command": "echo 'Build step placeholder'",
+    "watch_dir": "./worker"
+  },
+
+  // Environment variables (will be set via wrangler secret or dashboard)
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
+
+  // AI binding
   "ai": {
     "binding": "AI"
   },
+
+  // D1 Database binding
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "remodel",
+      "database_id": "27b4c738-e012-467c-96a3-378c8acaeb60",
+      "migrations_dir": "./migrations"
+    }
+  ],
+
   // Container configuration
   "containers": [
     {
@@ -14,9 +38,11 @@
       "class_name": "RemodelApp",
       "image": "./Dockerfile",
       "instance_type": "standard-1",
-      "max_instances": 5,
+      "max_instances": 5
     }
   ],
+
+  // Durable Objects (if using containers as Durable Objects)
   "durable_objects": {
     "bindings": [
       {
@@ -25,6 +51,8 @@
       }
     ]
   },
+
+  // Migrations for Durable Objects
   "migrations": [
     {
       "tag": "v1",
@@ -33,16 +61,9 @@
       ]
     }
   ],
+
+  // Observability
   "observability": {
     "enabled": true
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "remodel",
-      "database_id": "27b4c738-e012-467c-96a3-378c8acaeb60",
-      "remote": true,
-      "migrations_dir": "./migrations"
-    }
-  ]
+  }
 }
