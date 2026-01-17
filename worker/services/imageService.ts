@@ -207,8 +207,9 @@ export async function deleteImage(
   });
 
   if (!deleteResponse.ok) {
-    console.error(`Failed to delete from Cloudflare Images: ${deleteResponse.status}`);
-    // Continue with DB deletion even if CF deletion fails
+    const errorText = await deleteResponse.text();
+    console.error(`Failed to delete from Cloudflare Images: ${deleteResponse.status} - ${errorText}`);
+    throw new Error('Failed to delete image from Cloudflare Images.');
   }
 
   // Delete from database
