@@ -323,7 +323,7 @@ const result = await imagesApi.upload({
 # View database contents
 npx wrangler d1 execute remodel --local --command "SELECT * FROM projects"
 
-# Reset database (DANGER: deletes all data)
+# Reset database (DANGER: THIS DELETES ALL DATA. USE WITH EXTREME CAUTION.)
 npx wrangler d1 execute remodel --local --command "DROP TABLE projects"
 npm run db:migrate:local
 ```
