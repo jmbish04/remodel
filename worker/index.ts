@@ -1,45 +1,57 @@
 /**
- * Cloudflare Worker proxy for Ultimate AI Architect container
- * This worker routes requests to the Next.js container running on Cloudflare Containers
- * 
- * The GEMINI_API_KEY is passed to the container as an environment variable during deployment.
- * Configure this in your wrangler.jsonc or via `wrangler secret put GEMINI_API_KEY`
+ * Cloudflare Worker - Hono API Gateway + Next.js Container Proxy
+ *
+ * Architecture:
+ * - /api/* → Hono routes (REST API for D1, Cloudflare Images, Gemini AI)
+ * - /* → Next.js container (frontend application)
  */
 
-export interface Env {
-  ENVIRONMENT: string;
-  GEMINI_API_KEY: string;
-  AI_ARCHITECT: Fetcher; // Container binding
-}
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import type { Env } from './types';
+import healthRoutes from './routes/health.routes';
+import projectsRoutes from './routes/projects.routes';
+import floorsRoutes from './routes/floors.routes';
+import roomsRoutes from './routes/rooms.routes';
+import imagesRoutes from './routes/images.routes';
+import visualsRoutes from './routes/visuals.routes';
+import logsRoutes from './routes/logs.routes';
+import snapshotsRoutes from './routes/snapshots.routes';
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
+const app = new Hono<{ Bindings: Env }>();
 
-    // Health check endpoint
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', environment: env.ENVIRONMENT }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+app.use('/api/*', cors());
 
-    // Forward all requests to the container
-    // The container binding automatically routes to the running container
-    try {
-      const containerRequest = new Request(request.url, {
-        method: request.method,
-        headers: request.headers,
-        body: request.body,
-      });
+app.route('/health', healthRoutes);
+app.route('/api/projects', projectsRoutes);
+app.route('/api/floors', floorsRoutes);
+app.route('/api/rooms', roomsRoutes);
+app.route('/api/images', imagesRoutes);
+app.route('/api/generate', visualsRoutes);
+app.route('/api/logs', logsRoutes);
+app.route('/api/snapshots', snapshotsRoutes);
 
-      const response = await env.AI_ARCHITECT.fetch(containerRequest);
-      return response;
-    } catch (error) {
-      console.error('Container fetch error:', error);
-      return new Response(JSON.stringify({ error: 'Container unavailable' }), {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-  },
-};
+app.all('*', async (c) => {
+  try {
+    const containerRequest = new Request(c.req.url, {
+      method: c.req.method,
+      headers: c.req.raw.headers,
+      body: c.req.raw.body,
+    });
+
+    const response = await c.env.AI_ARCHITECT.fetch(containerRequest);
+
+    return response;
+  } catch (error) {
+    console.error('Container fetch error:', error);
+    return c.json(
+      {
+        error: 'Container unavailable',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      },
+      503
+    );
+  }
+});
+
+export default app;
