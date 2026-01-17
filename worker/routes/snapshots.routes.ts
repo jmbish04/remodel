@@ -5,7 +5,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { floorPlanSnapshots, type NewFloorPlanSnapshot } from '../db/schema';
-import type { Env } from '../types';
 
 const snapshotsRouter = new Hono<{ Bindings: Env }>();
 

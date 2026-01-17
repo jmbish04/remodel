@@ -6,7 +6,6 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, inArray } from 'drizzle-orm';
 import { projects, floors, rooms, type NewProject } from '../db/schema';
-import type { Env } from '../types';
 
 const projectsRouter = new Hono<{ Bindings: Env }>();
 
@@ -62,6 +61,15 @@ projectsRouter.get('/:id', async (c) => {
       ...project,
       floors: floorsWithRooms,
     },
+  });
+});
+
+projectsRouter.get('/', async (c) => {
+  const db = drizzle(c.env.DB);
+  const allProjects = await db.select().from(projects).all();
+  return c.json({
+    success: true,
+    projects: allProjects,
   });
 });
 

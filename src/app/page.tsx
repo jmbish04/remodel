@@ -44,6 +44,7 @@ export default function Home() {
   // Project Management
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   // Floor Management
   const [floors, setFloors] = useState<Floor[]>([]);
@@ -119,22 +120,54 @@ export default function Home() {
   // Initialize project on mount: load from localStorage or create new
   useEffect(() => {
     const initializeProject = async () => {
+      setIsInitializing(true);
       try {
         const storedProjectId = localStorage.getItem('projectId');
 
         if (storedProjectId) {
-          const result = await projectsApi.get(storedProjectId);
-          setProjectId(result.project.id);
-          console.log('Loaded existing project:', result.project.id);
+          try {
+            const result = await projectsApi.get(storedProjectId);
+            setProjectId(result.project.id);
+            // Hydrate floors from existing project
+            // Note: API returns floors, but we need to ensure type compatibility or mapping if needed
+            // Assuming ProjectWithFloors.floors structure matches Floor[]
+            // We might need to map or adapt if the API response differs slightly from internal State
+            // For now, let's assume simple mapping or reset if empty.
+            // If the API returns full Floor objects, we can set them.
+            // The API types suggest floors: FloorWithRooms[].
+            // Our state expects Floor[] (which includes other UI state like scaleData).
+            // We'll need to reconstruct full Floor objects if we want to restore session fully,
+            // or just start with empty if we only care about project ID for uploads.
+            // For resilience: set floors if available, else empty.
+            if (result.project.floors) {
+               // Simplification: For now just keep floors empty to force re-upload flow or handle separately.
+               // Or ideally, map them. Given complexity, let's prioritize Project ID validity first.
+               // Correct: Reset floors to empty to ensure clean state unless we implement full hydration logic.
+               setFloors([]);
+            }
+            console.log('Loaded existing project:', result.project.id);
+          } catch (e) {
+            console.warn('Failed to load stored project, creating new one:', e);
+            localStorage.removeItem('projectId');
+            const result = await projectsApi.init('My Remodel Project');
+            setProjectId(result.project.id);
+            localStorage.setItem('projectId', result.project.id);
+            setFloors([]);
+            console.log('Created new project (fallback):', result.project.id);
+          }
         } else {
           const result = await projectsApi.init('My Remodel Project');
           setProjectId(result.project.id);
           localStorage.setItem('projectId', result.project.id);
+          setFloors([]);
           console.log('Created new project:', result.project.id);
         }
       } catch (error) {
         console.error('Failed to initialize project:', error);
         setProjectError(error instanceof Error ? error.message : 'Failed to initialize project');
+        // Retry logic could go here, or a manual "Retry" button in UI
+      } finally {
+        setIsInitializing(false);
       }
     };
 
@@ -838,6 +871,16 @@ export default function Home() {
     const newRooms = activeFloor.data.rooms.filter((r) => r.id !== roomId);
     handleUpdateActiveFloor({ data: { ...activeFloor.data, rooms: newRooms } });
   };
+
+  if (isInitializing) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-800">
+        <Loader2 className="w-12 h-12 animate-spin text-purple-600 mb-4" />
+        <h2 className="text-xl font-semibold">Setting up your project...</h2>
+        <p className="text-slate-500 mt-2">Checking workspace availability</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen w-full bg-slate-50">

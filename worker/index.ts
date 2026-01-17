@@ -6,52 +6,8 @@
  * - /* → Next.js container (frontend application)
  */
 
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import type { Env } from './types';
-import healthRoutes from './routes/health.routes';
-import projectsRoutes from './routes/projects.routes';
-import floorsRoutes from './routes/floors.routes';
-import roomsRoutes from './routes/rooms.routes';
-import imagesRoutes from './routes/images.routes';
-import visualsRoutes from './routes/visuals.routes';
-import logsRoutes from './routes/logs.routes';
-import snapshotsRoutes from './routes/snapshots.routes';
+import app from './app';
+import { RemodelApp } from './container';
 
-const app = new Hono<{ Bindings: Env }>();
-
-app.use('/api/*', cors());
-
-app.route('/health', healthRoutes);
-app.route('/api/projects', projectsRoutes);
-app.route('/api/floors', floorsRoutes);
-app.route('/api/rooms', roomsRoutes);
-app.route('/api/images', imagesRoutes);
-app.route('/api/generate', visualsRoutes);
-app.route('/api/logs', logsRoutes);
-app.route('/api/snapshots', snapshotsRoutes);
-
-app.all('*', async (c) => {
-  try {
-    const containerRequest = new Request(c.req.url, {
-      method: c.req.method,
-      headers: c.req.raw.headers,
-      body: c.req.raw.body,
-    });
-
-    const response = await c.env.AI_ARCHITECT.fetch(containerRequest);
-
-    return response;
-  } catch (error) {
-    console.error('Container fetch error:', error);
-    return c.json(
-      {
-        error: 'Container unavailable',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      },
-      503
-    );
-  }
-});
-
+export { RemodelApp };
 export default app;

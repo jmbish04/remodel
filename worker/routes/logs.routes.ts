@@ -6,7 +6,6 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import { agentLogs, type NewAgentLog } from '../db/schema';
-import type { Env } from '../types';
 
 const logsRouter = new Hono<{ Bindings: Env }>();
 

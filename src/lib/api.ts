@@ -129,7 +129,7 @@ async function apiCall<T>(
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
+    const errorData = await response.json().catch(() => ({})) as any;
     throw new Error(errorData.error || `API error: ${response.status}`);
   }
 

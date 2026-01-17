@@ -192,7 +192,7 @@ export async function deleteImage(
 ): Promise<void> {
   const db = drizzle(env.DB);
 
-  const imageRecord = await db.select().from(images).where(images.id.eq(imageId)).get();
+  const imageRecord = await db.select().from(images).where(eq(images.id, imageId)).get();
 
   if (!imageRecord) {
     throw new Error(`Image not found: ${imageId}`);
@@ -212,7 +212,7 @@ export async function deleteImage(
     console.error(`Failed to delete from Cloudflare Images: ${deleteResponse.status} - ${errorText}. Proceeding with DB deletion.`);
   }
 
-  await db.delete(images).where(images.id.eq(imageId));
+  await db.delete(images).where(eq(images.id, imageId));
 }
 
 /**

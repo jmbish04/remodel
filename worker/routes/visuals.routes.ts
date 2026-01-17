@@ -4,7 +4,6 @@
 
 import { Hono } from 'hono';
 import { uploadBase64Image } from '../services/imageService';
-import type { Env } from '../types';
 
 const visualsRouter = new Hono<{ Bindings: Env }>();
 
@@ -50,7 +49,7 @@ visualsRouter.post('/visual', async (c) => {
     );
   }
 
-  const geminiData = await geminiResponse.json();
+  const geminiData = await geminiResponse.json() as any;
   const candidates = geminiData.candidates;
 
   if (!candidates || candidates.length === 0) {
@@ -88,8 +87,8 @@ visualsRouter.post('/visual', async (c) => {
       generationModel: model,
     },
     {
-      CF_IMAGES_TOKEN: c.env.CF_IMAGES_TOKEN,
-      CF_ACCOUNT_ID: c.env.CF_ACCOUNT_ID,
+      CF_IMAGES_TOKEN: c.env.CLOUDFLARE_IMAGES_STREAM_TOKEN,
+      CF_ACCOUNT_ID: c.env.CLOUDFLARE_ACCOUNT_ID,
       DB: c.env.DB,
     }
   );

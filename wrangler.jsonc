@@ -1,19 +1,20 @@
 {
   // Cloudflare Worker configuration with Hono API + Container Proxy
-  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "remodel",
   "main": "worker/index.ts",
   "compatibility_date": "2026-01-01",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "upload_source_maps": true,
 
   // Build configuration for TypeScript worker
   "build": {
     "command": "echo 'Build step placeholder'",
     "watch_dir": "./worker"
-  },
-
-  // Environment variables (will be set via wrangler secret or dashboard)
-  "vars": {
-    "ENVIRONMENT": "production"
   },
 
   // AI binding
@@ -65,5 +66,10 @@
   // Observability
   "observability": {
     "enabled": true
+  },
+
+  "vars": {
+    "CONTAINER_PORT": "3000",
+    "API_URL": "https://remodel.hacolby.workers.dev"
   }
 }

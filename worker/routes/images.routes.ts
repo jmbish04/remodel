@@ -7,7 +7,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
 import { images } from '../db/schema';
 import { uploadBase64Image } from '../services/imageService';
-import type { Env } from '../types';
 
 const imagesRouter = new Hono<{ Bindings: Env }>();
 
@@ -42,8 +41,8 @@ imagesRouter.post('/upload', async (c) => {
       height: body.height,
     },
     {
-      CF_IMAGES_TOKEN: c.env.CF_IMAGES_TOKEN,
-      CF_ACCOUNT_ID: c.env.CF_ACCOUNT_ID,
+      CF_IMAGES_TOKEN: c.env.CLOUDFLARE_IMAGES_STREAM_TOKEN,
+      CF_ACCOUNT_ID: c.env.CLOUDFLARE_ACCOUNT_ID,
       DB: c.env.DB,
     }
   );

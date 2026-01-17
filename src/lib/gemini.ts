@@ -193,7 +193,7 @@ async function generateImageFromPrompt(
     throw new Error(`API Error: ${response.status}`);
   }
 
-  const data = await response.json();
+  const data = await response.json() as any;
   const candidates = data.candidates;
   if (candidates && candidates.length > 0) {
     const parts = candidates[0].content.parts;

@@ -6,7 +6,6 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import { rooms, type NewRoom } from '../db/schema';
-import type { Env } from '../types';
 
 const roomsRouter = new Hono<{ Bindings: Env }>();
 
