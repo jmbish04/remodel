@@ -36,8 +36,13 @@ import {
   fileToBase64,
 } from '@/lib/gemini';
 import { Floor, HistoryEntry, AppStep, ChatMessage, VisualParams, Wall, Point, FloorPlanData, RulerData, CanvasMode } from '@/types';
+import { projectsApi, floorsApi, imagesApi, visualsApi, logsApi, snapshotsApi } from '@/lib/api';
 
 export default function Home() {
+  // Project Management
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
+
   // Floor Management
   const [floors, setFloors] = useState<Floor[]>([]);
   const [activeFloorId, setActiveFloorId] = useState<string | null>(null);
@@ -105,6 +110,33 @@ export default function Home() {
 
   // Distance helper
   const getDistance = (p1: Point, p2: Point) => Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+  // Initialize or load project on mount
+  useEffect(() => {
+    const initializeProject = async () => {
+      try {
+        const storedProjectId = localStorage.getItem('projectId');
+
+        if (storedProjectId) {
+          // Load existing project
+          const result = await projectsApi.get(storedProjectId);
+          setProjectId(result.project.id);
+          console.log('Loaded existing project:', result.project.id);
+        } else {
+          // Create new project
+          const result = await projectsApi.init('My Remodel Project');
+          setProjectId(result.project.id);
+          localStorage.setItem('projectId', result.project.id);
+          console.log('Created new project:', result.project.id);
+        }
+      } catch (error) {
+        console.error('Failed to initialize project:', error);
+        setProjectError(error instanceof Error ? error.message : 'Failed to initialize project');
+      }
+    };
+
+    initializeProject();
+  }, []);
 
   // Reset wizard history when floor changes
   useEffect(() => {
@@ -232,16 +264,52 @@ export default function Home() {
   // Handle floor name submission from modal
   const handleFloorNameSubmit = async (floorName: string) => {
     setShowFloorNameModal(false);
-    
+
     if (!pendingFloorData) return;
-    
+    if (!projectId) {
+      alert('Project not initialized. Please refresh the page.');
+      return;
+    }
+
     const { base64, imgUrl, dims } = pendingFloorData;
     setPendingFloorData(null);
-    
+
     setLoading(true);
     setLoadingMessage(`Digitizing ${floorName}...`);
-    
+
     try {
+      // Create floor in database
+      const floorResult = await floorsApi.create(
+        projectId,
+        floorName,
+        false, // isUnderground
+        floors.length // sortOrder
+      );
+      const floorId = floorResult.floor.id;
+
+      // Upload blueprint to Cloudflare Images
+      setLoadingMessage('Uploading blueprint to CDN...');
+      await imagesApi.upload({
+        base64Data: imgUrl,
+        ownerType: 'floor',
+        ownerId: floorId,
+        type: 'blueprint_original',
+        width: dims.width,
+        height: dims.height,
+      });
+
+      // Log wizard step
+      await logsApi.create({
+        floorId,
+        stepName: 'Blueprint Upload',
+        stepIndex: 0,
+        thoughtProcess: 'User uploaded blueprint image',
+        actionTaken: `Uploaded blueprint for ${floorName} to Cloudflare Images`,
+        inputData: { width: dims.width, height: dims.height },
+        status: 'success',
+      });
+
+      setLoadingMessage(`Processing ${floorName} with AI...`);
       const data = await digitizePlan(base64, dims.width, dims.height);
 
       const rulerStart = { x: dims.width * 0.3, y: dims.height * 0.5 };
@@ -258,7 +326,7 @@ export default function Home() {
       };
 
       const newFloor: Floor = {
-        id: crypto.randomUUID(),
+        id: floorId,
         name: floorName,
         imageSrc: imgUrl,
         imageDims: dims,
@@ -272,6 +340,17 @@ export default function Home() {
         history: [initialHistory],
         currentVersionId: initialVersionId,
       };
+
+      // Log AI processing step
+      await logsApi.create({
+        floorId,
+        stepName: 'AI Digitization',
+        stepIndex: 1,
+        thoughtProcess: 'AI processed blueprint to extract walls, doors, and rooms',
+        actionTaken: `Digitized ${data.walls.length} walls and ${data.rooms.length} rooms`,
+        outputData: { wallCount: data.walls.length, roomCount: data.rooms.length },
+        status: 'success',
+      });
 
       setFloors((prev) => [...prev, newFloor]);
       setActiveFloorId(newFloor.id);
@@ -289,7 +368,7 @@ export default function Home() {
     setFloors((prev) => prev.map((f) => (f.id === activeFloorId ? { ...f, ...updates } : f)));
   };
 
-  const handleApplyCalibration = () => {
+  const handleApplyCalibration = async () => {
     if (!activeFloor) return;
     const feet = parseFloat(calFeet) || 0;
     const inches = parseFloat(calInches) || 0;
@@ -309,6 +388,28 @@ export default function Home() {
     handleUpdateActiveFloor({
       scaleData: { pixelsPerFoot, calibrated: true },
     });
+
+    // Sync calibration to database
+    try {
+      await floorsApi.sync(activeFloor.id, {
+        scaleRatio: pixelsPerFoot,
+        isCalibrated: true,
+      });
+
+      // Log calibration step
+      await logsApi.create({
+        floorId: activeFloor.id,
+        stepName: 'Calibration',
+        stepIndex: 2,
+        thoughtProcess: `User set calibration: ${totalFeet} feet = ${pixelDistance.toFixed(2)} pixels`,
+        actionTaken: `Set scale ratio to ${pixelsPerFoot.toFixed(2)} pixels/foot`,
+        inputData: { feet, inches, totalFeet, pixelDistance },
+        outputData: { pixelsPerFoot },
+        status: 'success',
+      });
+    } catch (error) {
+      console.error('Failed to sync calibration:', error);
+    }
   };
 
   // --- Wizard Canvas Handlers ---
@@ -407,6 +508,23 @@ export default function Home() {
     setChatHistory((prev) => [...prev, { role: 'user', text: userMsg, timestamp: Date.now() }]);
 
     try {
+      // Save snapshot before remodel
+      const currentVersion = activeFloor.history.length;
+      setLoadingMessage('Saving current layout...');
+      await snapshotsApi.create({
+        floorId: activeFloor.id,
+        versionNumber: currentVersion,
+        description: `Before: ${userMsg}`,
+        planData: {
+          walls: activeFloor.data.walls,
+          rooms: activeFloor.data.rooms,
+          width: activeFloor.data.width || 0,
+          height: activeFloor.data.height || 0,
+        },
+        remodelZone: activeFloor.remodelZone,
+      });
+
+      setLoadingMessage('Computing remodel...');
       const newPlan = await computeRemodel(activeFloor.data, activeFloor.remodelZone, userMsg);
       if (activeFloor.data.width) newPlan.width = activeFloor.data.width;
       if (activeFloor.data.height) newPlan.height = activeFloor.data.height;
@@ -427,6 +545,32 @@ export default function Home() {
         currentVersionId: newVersionId,
       });
 
+      // Save snapshot after remodel
+      setLoadingMessage('Saving new layout...');
+      await snapshotsApi.create({
+        floorId: activeFloor.id,
+        versionNumber: currentVersion + 1,
+        description: `After: ${userMsg}`,
+        planData: {
+          walls: newPlan.walls,
+          rooms: newPlan.rooms,
+          width: newPlan.width || 0,
+          height: newPlan.height || 0,
+        },
+        remodelZone: activeFloor.remodelZone,
+      });
+
+      // Log remodel operation
+      await logsApi.create({
+        floorId: activeFloor.id,
+        stepName: 'Remodel Generation',
+        thoughtProcess: `User requested: ${userMsg}`,
+        actionTaken: `Generated new layout with ${newPlan.walls.length} walls and ${newPlan.rooms.length} rooms`,
+        inputData: { prompt: userMsg, remodelZone: activeFloor.remodelZone },
+        outputData: { wallCount: newPlan.walls.length, roomCount: newPlan.rooms.length },
+        status: 'success',
+      });
+
       setActiveTab('history');
       setChatHistory((prev) => [
         ...prev,
@@ -438,6 +582,19 @@ export default function Home() {
         ...prev,
         { role: 'ai', text: 'Sorry, I encountered an error generating the remodel.', timestamp: Date.now() },
       ]);
+
+      // Log error
+      if (activeFloor) {
+        await logsApi.create({
+          floorId: activeFloor.id,
+          stepName: 'Remodel Generation',
+          thoughtProcess: `User requested: ${userMsg}`,
+          actionTaken: 'Failed to generate remodel',
+          inputData: { prompt: userMsg },
+          status: 'error',
+          errorMessage: e instanceof Error ? e.message : 'Unknown error',
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -461,8 +618,25 @@ export default function Home() {
     setLoadingMessage('Generating 3D render...');
     setVisualError(null);
     try {
-      const result = await generate3D(activeFloor.imageSrc, visualParams.perspective, visualParams.style);
-      setRender3D(result);
+      const prompt = `Generate a ${visualParams.perspective} architectural visualization in ${visualParams.style} style`;
+      const result = await visualsApi.generate({
+        imageBase64: activeFloor.imageSrc,
+        prompt,
+        generationType: 'render_3d',
+        ownerId: activeFloor.id,
+        ownerType: 'floor',
+      });
+      setRender3D(result.base64);
+
+      // Log generation
+      await logsApi.create({
+        floorId: activeFloor.id,
+        stepName: '3D Render Generation',
+        actionTaken: 'Generated 3D visualization',
+        inputData: { perspective: visualParams.perspective, style: visualParams.style },
+        outputData: { imageId: result.imageId },
+        status: 'success',
+      });
     } catch (err) {
       setVisualError(err instanceof Error ? err.message : 'Failed to generate 3D');
     } finally {
@@ -472,13 +646,30 @@ export default function Home() {
 
   const handleGenerateInterior = async () => {
     const source = render3D || activeFloor?.imageSrc;
-    if (!source) return;
+    if (!source || !activeFloor) return;
     setLoading(true);
     setLoadingMessage('Generating interior view...');
     setVisualError(null);
     try {
-      const result = await visualizeInterior(source, visualParams.roomName);
-      setInteriorView(result);
+      const prompt = `Create an interior perspective view of the ${visualParams.roomName}`;
+      const result = await visualsApi.generate({
+        imageBase64: source,
+        prompt,
+        generationType: 'render_interior',
+        ownerId: activeFloor.id,
+        ownerType: 'floor',
+      });
+      setInteriorView(result.base64);
+
+      // Log generation
+      await logsApi.create({
+        floorId: activeFloor.id,
+        stepName: 'Interior View Generation',
+        actionTaken: 'Generated interior perspective',
+        inputData: { roomName: visualParams.roomName },
+        outputData: { imageId: result.imageId },
+        status: 'success',
+      });
     } catch (err) {
       setVisualError(err instanceof Error ? err.message : 'Failed to generate interior');
     } finally {
@@ -488,13 +679,29 @@ export default function Home() {
 
   const handleEditDesign = async () => {
     const source = interiorView || render3D;
-    if (!source) return;
+    if (!source || !activeFloor) return;
     setLoading(true);
     setLoadingMessage('Applying design changes...');
     setVisualError(null);
     try {
-      const result = await editDesign(source, visualParams.instruction);
-      setEditedView(result);
+      const result = await visualsApi.generate({
+        imageBase64: source,
+        prompt: visualParams.instruction,
+        generationType: 'render_edited',
+        ownerId: activeFloor.id,
+        ownerType: 'floor',
+      });
+      setEditedView(result.base64);
+
+      // Log generation
+      await logsApi.create({
+        floorId: activeFloor.id,
+        stepName: 'Design Edit',
+        actionTaken: 'Applied design modification',
+        inputData: { instruction: visualParams.instruction },
+        outputData: { imageId: result.imageId },
+        status: 'success',
+      });
     } catch (err) {
       setVisualError(err instanceof Error ? err.message : 'Failed to edit design');
     } finally {
@@ -504,13 +711,29 @@ export default function Home() {
 
   const handleGenerateVideo = async () => {
     const source = editedView || interiorView || render3D;
-    if (!source) return;
+    if (!source || !activeFloor) return;
     setLoading(true);
     setLoadingMessage('Generating cinematic frame...');
     setVisualError(null);
     try {
-      const result = await generateVideoFrame(source);
-      setVideoFrame(result);
+      const prompt = 'Generate a cinematic walkthrough frame';
+      const result = await visualsApi.generate({
+        imageBase64: source,
+        prompt,
+        generationType: 'render_video_frame',
+        ownerId: activeFloor.id,
+        ownerType: 'floor',
+      });
+      setVideoFrame(result.base64);
+
+      // Log generation
+      await logsApi.create({
+        floorId: activeFloor.id,
+        stepName: 'Video Frame Generation',
+        actionTaken: 'Generated cinematic frame',
+        outputData: { imageId: result.imageId },
+        status: 'success',
+      });
     } catch (err) {
       setVisualError(err instanceof Error ? err.message : 'Failed to generate video');
     } finally {
