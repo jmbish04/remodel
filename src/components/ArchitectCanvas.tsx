@@ -44,18 +44,16 @@ const ArchitectCanvas: React.FC<ArchitectCanvasProps> = ({
   const rulerStroke = 4 * uiScale;
   const fontSize = 24 * uiScale;
 
-  // Coordinate conversion using SVG Matrix
+  // Coordinate conversion using DOMMatrix
   const getMousePos = (e: React.MouseEvent | React.PointerEvent): Point => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
 
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-
     const ctm = svg.getScreenCTM();
     if (!ctm) return { x: 0, y: 0 };
 
+    // Use DOMPoint instead of deprecated createSVGPoint
+    const pt = new DOMPoint(e.clientX, e.clientY);
     const svgP = pt.matrixTransform(ctm.inverse());
     return { x: svgP.x, y: svgP.y };
   };
