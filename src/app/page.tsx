@@ -111,19 +111,17 @@ export default function Home() {
   // Distance helper
   const getDistance = (p1: Point, p2: Point) => Math.hypot(p2.x - p1.x, p2.y - p1.y);
 
-  // Initialize or load project on mount
+  // Initialize project on mount: load from localStorage or create new
   useEffect(() => {
     const initializeProject = async () => {
       try {
         const storedProjectId = localStorage.getItem('projectId');
 
         if (storedProjectId) {
-          // Load existing project
           const result = await projectsApi.get(storedProjectId);
           setProjectId(result.project.id);
           console.log('Loaded existing project:', result.project.id);
         } else {
-          // Create new project
           const result = await projectsApi.init('My Remodel Project');
           setProjectId(result.project.id);
           localStorage.setItem('projectId', result.project.id);
@@ -261,7 +259,6 @@ export default function Home() {
     }
   };
 
-  // Handle floor name submission from modal
   const handleFloorNameSubmit = async (floorName: string) => {
     setShowFloorNameModal(false);
 
@@ -278,16 +275,14 @@ export default function Home() {
     setLoadingMessage(`Digitizing ${floorName}...`);
 
     try {
-      // Create floor in database
       const floorResult = await floorsApi.create(
         projectId,
         floorName,
-        false, // isUnderground
-        floors.length // sortOrder
+        false,
+        floors.length
       );
       const floorId = floorResult.floor.id;
 
-      // Upload blueprint to Cloudflare Images
       setLoadingMessage('Uploading blueprint to CDN...');
       await imagesApi.upload({
         base64Data: imgUrl,
@@ -298,7 +293,6 @@ export default function Home() {
         height: dims.height,
       });
 
-      // Log wizard step
       await logsApi.create({
         floorId,
         stepName: 'Blueprint Upload',
@@ -341,7 +335,6 @@ export default function Home() {
         currentVersionId: initialVersionId,
       };
 
-      // Log AI processing step
       await logsApi.create({
         floorId,
         stepName: 'AI Digitization',
@@ -389,14 +382,12 @@ export default function Home() {
       scaleData: { pixelsPerFoot, calibrated: true },
     });
 
-    // Sync calibration to database
     try {
       await floorsApi.sync(activeFloor.id, {
         scaleRatio: pixelsPerFoot,
         isCalibrated: true,
       });
 
-      // Log calibration step
       await logsApi.create({
         floorId: activeFloor.id,
         stepName: 'Calibration',
@@ -508,7 +499,6 @@ export default function Home() {
     setChatHistory((prev) => [...prev, { role: 'user', text: userMsg, timestamp: Date.now() }]);
 
     try {
-      // Save snapshot before remodel
       const currentVersion = activeFloor.history.length;
       setLoadingMessage('Saving current layout...');
       await snapshotsApi.create({
@@ -545,7 +535,6 @@ export default function Home() {
         currentVersionId: newVersionId,
       });
 
-      // Save snapshot after remodel
       setLoadingMessage('Saving new layout...');
       await snapshotsApi.create({
         floorId: activeFloor.id,
@@ -560,7 +549,6 @@ export default function Home() {
         remodelZone: activeFloor.remodelZone,
       });
 
-      // Log remodel operation
       await logsApi.create({
         floorId: activeFloor.id,
         stepName: 'Remodel Generation',
@@ -583,7 +571,6 @@ export default function Home() {
         { role: 'ai', text: 'Sorry, I encountered an error generating the remodel.', timestamp: Date.now() },
       ]);
 
-      // Log error
       if (activeFloor) {
         await logsApi.create({
           floorId: activeFloor.id,
@@ -611,7 +598,6 @@ export default function Home() {
     }
   };
 
-  // Visual Generation Handlers
   const handleGenerate3D = async () => {
     if (!activeFloor?.imageSrc) return;
     setLoading(true);
@@ -628,7 +614,6 @@ export default function Home() {
       });
       setRender3D(result.base64);
 
-      // Log generation
       await logsApi.create({
         floorId: activeFloor.id,
         stepName: '3D Render Generation',
@@ -661,7 +646,6 @@ export default function Home() {
       });
       setInteriorView(result.base64);
 
-      // Log generation
       await logsApi.create({
         floorId: activeFloor.id,
         stepName: 'Interior View Generation',
@@ -693,7 +677,6 @@ export default function Home() {
       });
       setEditedView(result.base64);
 
-      // Log generation
       await logsApi.create({
         floorId: activeFloor.id,
         stepName: 'Design Edit',
@@ -726,7 +709,6 @@ export default function Home() {
       });
       setVideoFrame(result.base64);
 
-      // Log generation
       await logsApi.create({
         floorId: activeFloor.id,
         stepName: 'Video Frame Generation',
