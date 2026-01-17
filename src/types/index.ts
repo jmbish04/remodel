@@ -4,12 +4,29 @@ export interface Point {
   y: number;
 }
 
+// Rectangle primitive for wizard tools
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// Orientation data for compass and front door
+export interface OrientationData {
+  frontDoorId?: string;
+  garageRect?: Rect;
+  garageWidth?: number; // in feet, calculated from pixels
+  frontAngle?: number; // 0-360 degrees
+}
+
 // Wall representation
 export interface Wall {
   id: string;
   start: Point;
   end: Point;
   type: 'wall' | 'window' | 'door' | 'opening';
+  doorType?: 'entry' | 'sliding' | 'french' | 'pocket';
   isExternal: boolean;
   isLoadBearing?: boolean;
 }
@@ -20,6 +37,7 @@ export interface Room {
   name: string;
   labelPosition: Point;
   approxArea?: number;
+  dimensions?: string; // e.g. "12' x 14'"
 }
 
 // Digitized floor plan data
@@ -74,16 +92,37 @@ export interface Floor {
   scaleData: ScaleData;
   remodelZone: RemodelZone | null;
   calibrationRuler: RulerData;
+  garageRuler?: RulerData;
+
+  // Wizard Specific Data
+  stairLocation?: Rect;
+  orientation?: OrientationData;
+  isUnderground?: boolean;
+
+  // Version Control
   history: HistoryEntry[];
   currentVersionId: string;
 }
 
 // Application steps
 export enum AppStep {
+  // Initial and Setup
   PROJECT_OVERVIEW = 'PROJECT_OVERVIEW',
   UPLOAD_FLOOR = 'UPLOAD_FLOOR',
   DIGITIZING = 'DIGITIZING',
+
+  // Wizard Flow
   CALIBRATION = 'CALIBRATION',
+  STAIR_MARKING = 'STAIR_MARKING',
+  CORRECTION_DOORS = 'CORRECTION_DOORS',
+  CORRECTION_WALLS = 'CORRECTION_WALLS',
+  STRUCTURAL_ID = 'STRUCTURAL_ID',
+  EXTERIOR_CHECK = 'EXTERIOR_CHECK',
+  LABEL_REVIEW = 'LABEL_REVIEW',
+  SCALE_VERIFICATION_ROOMS = 'SCALE_VERIFICATION_ROOMS',
+  ORIENTATION = 'ORIENTATION',
+
+  // Final States
   REMODEL = 'REMODEL',
   VISUALIZE = 'VISUALIZE',
 }
